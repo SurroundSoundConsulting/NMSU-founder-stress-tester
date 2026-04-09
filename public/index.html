@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Founder Stress Tester</title>
+  <style>
+    :root {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      line-height: 1.5;
+      color: #1a1a1a;
+      background: #f5f5f7;
+    }
+    body {
+      max-width: 40rem;
+      margin: 0 auto;
+      padding: 1.5rem;
+    }
+    h1 {
+      font-size: 1.5rem;
+      margin-top: 0;
+    }
+    label {
+      font-weight: 600;
+    }
+    textarea {
+      width: 100%;
+      max-width: 100%;
+      box-sizing: border-box;
+      margin-top: 0.35rem;
+      padding: 0.6rem 0.75rem;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      font: inherit;
+      resize: vertical;
+      min-height: 8rem;
+    }
+    select {
+      display: block;
+      margin-top: 0.35rem;
+      padding: 0.45rem 0.6rem;
+      font: inherit;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      max-width: 100%;
+      background: #fff;
+    }
+    .mode-row {
+      margin-top: 1rem;
+    }
+    .mode-row .hint {
+      margin-top: 0.35rem;
+      margin-bottom: 0;
+    }
+    button {
+      margin-top: 0.75rem;
+      padding: 0.5rem 1rem;
+      font: inherit;
+      cursor: pointer;
+      border-radius: 8px;
+      border: 1px solid #333;
+      background: #222;
+      color: #fff;
+    }
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+    .hint {
+      font-size: 0.9rem;
+      color: #555;
+      margin-bottom: 1rem;
+    }
+    .status {
+      margin-top: 1rem;
+      font-size: 0.95rem;
+      color: #444;
+    }
+    .error {
+      color: #b00020;
+      background: #ffe8ec;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      margin-top: 1rem;
+    }
+    #results {
+      margin-top: 1.5rem;
+    }
+    #results section {
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 10px;
+      padding: 1rem 1.1rem;
+      margin-bottom: 1rem;
+    }
+    #results h2 {
+      font-size: 1.05rem;
+      margin: 0 0 0.5rem 0;
+    }
+    #results ul {
+      margin: 0;
+      padding-left: 1.2rem;
+    }
+    #results li {
+      margin-bottom: 0.35rem;
+    }
+    #results p {
+      margin: 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>Founder Stress Tester</h1>
+  <p class="hint">
+    Type a startup idea. The app sends it to the server, which calls an AI model and returns
+    assumptions, risks, and a quick validation test.
+  </p>
+
+  <label for="idea">Startup idea</label>
+  <textarea
+    id="idea"
+    placeholder="Example: A subscription box for rare houseplants aimed at busy professionals in Austin..."
+  ></textarea>
+
+  <div class="mode-row">
+    <label for="mode">Stress test mode</label>
+    <select id="mode" aria-describedby="mode-hint">
+      <option value="brutal">Brutal</option>
+      <option value="balanced" selected>Balanced</option>
+      <option value="supportive">Supportive</option>
+    </select>
+    <p class="hint" id="mode-hint">
+      Brutal = toughest read. Balanced = fair. Supportive = gentler framing.
+    </p>
+  </div>
+
+  <button type="button" id="submit">Run stress test</button>
+
+  <p class="status" id="status" hidden aria-live="polite"></p>
+  <div class="error" id="error" hidden role="alert"></div>
+
+  <div id="results" hidden>
+    <section aria-labelledby="h-assumptions">
+      <h2 id="h-assumptions">Core assumptions</h2>
+      <ul id="coreAssumptions"></ul>
+    </section>
+    <section aria-labelledby="h-risks">
+      <h2 id="h-risks">Major risks</h2>
+      <ul id="majorRisks"></ul>
+    </section>
+    <section aria-labelledby="h-validation">
+      <h2 id="h-validation">Fastest validation test</h2>
+      <p id="fastestValidationTest"></p>
+    </section>
+  </div>
+
+  <script>
+    const ideaEl = document.getElementById("idea");
+    const modeEl = document.getElementById("mode");
+    const submitBtn = document.getElementById("submit");
+    const statusEl = document.getElementById("status");
+    const errorEl = document.getElementById("error");
+    const resultsEl = document.getElementById("results");
+    const listAssumptions = document.getElementById("coreAssumptions");
+    const listRisks = document.getElementById("majorRisks");
+    const textValidation = document.getElementById("fastestValidationTest");
+
+    function setLoading(isLoading) {
+      submitBtn.disabled = isLoading;
+      ideaEl.disabled = isLoading;
+      modeEl.disabled = isLoading;
+      if (isLoading) {
+        statusEl.hidden = false;
+        statusEl.textContent = "Thinking… this may take a few seconds.";
+      } else {
+        statusEl.hidden = true;
+        statusEl.textContent = "";
+      }
+    }
+
+    function showError(message) {
+      errorEl.hidden = false;
+      errorEl.textContent = message;
+    }
+
+    function clearError() {
+      errorEl.hidden = true;
+      errorEl.textContent = "";
+    }
+
+    function fillList(ul, items) {
+      ul.innerHTML = "";
+      (items || []).forEach(function (text) {
+        const li = document.createElement("li");
+        li.textContent = text;
+        ul.appendChild(li);
+      });
+    }
+
+    submitBtn.addEventListener("click", async function () {
+      const idea = ideaEl.value.trim();
+      clearError();
+      resultsEl.hidden = true;
+
+      if (!idea) {
+        showError("Please enter an idea first.");
+        return;
+      }
+
+      setLoading(true);
+      try {
+        // Same origin: page is served by Express, so /stress-test avoids CORS issues.
+        const res = await fetch("/stress-test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            idea: idea,
+            mode: modeEl.value,
+          }),
+        });
+
+        const data = await res.json().catch(function () {
+          return {};
+        });
+
+        if (!res.ok) {
+          showError(data.error || "Something went wrong. Check the server terminal.");
+          return;
+        }
+
+        fillList(listAssumptions, data.coreAssumptions);
+        fillList(listRisks, data.majorRisks);
+        textValidation.textContent = data.fastestValidationTest || "(none)";
+        resultsEl.hidden = false;
+      } catch (e) {
+        showError("Network error: is the server running? (" + String(e.message || e) + ")");
+      } finally {
+        setLoading(false);
+      }
+    });
+  </script>
+</body>
+</html>
