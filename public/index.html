@@ -511,7 +511,9 @@
       <div class="export-actions">
         <button type="button" id="generateMd">Generate Markdown</button>
         <button type="button" class="btn-secondary" id="copyMd">Copy Markdown</button>
+        <button type="button" class="btn-secondary" id="sendSheets" disabled>Send to Google Sheets</button>
       </div>
+      <p class="copy-hint" id="sheetsHint" hidden aria-live="polite"></p>
       <label for="markdownOutput" class="hint">Markdown output</label>
       <textarea id="markdownOutput" readonly rows="14" spellcheck="false" placeholder='Click "Generate Markdown" to build export from the results above.'></textarea>
       <p class="copy-hint" id="copyHint" hidden aria-live="polite"></p>
@@ -536,8 +538,11 @@
     const copyMdBtn = document.getElementById("copyMd");
     const markdownOutput = document.getElementById("markdownOutput");
     const copyHint = document.getElementById("copyHint");
+    const sendSheetsBtn = document.getElementById("sendSheets");
+    const sheetsHint = document.getElementById("sheetsHint");
 
     let lastResult = null;
+    let sheetsConfigured = false;
 
     function setLoading(isLoading) {
       submitBtn.disabled = isLoading;
@@ -635,6 +640,67 @@
       return lines.join("\n");
     }
 
+    function hideSheetsHint() {
+      sheetsHint.hidden = true;
+      sheetsHint.textContent = "";
+      sheetsHint.classList.remove("success");
+    }
+
+    function showSheetsHint(msg, success) {
+      sheetsHint.hidden = false;
+      sheetsHint.textContent = msg;
+      sheetsHint.classList.toggle("success", Boolean(success));
+      window.clearTimeout(showSheetsHint._t);
+      showSheetsHint._t = window.setTimeout(function () {
+        if (success) {
+          sheetsHint.hidden = true;
+          sheetsHint.textContent = "";
+          sheetsHint.classList.remove("success");
+        }
+      }, 4000);
+    }
+
+    async function refreshSheetsStatus() {
+      try {
+        const res = await fetch("/api/google-sheets/status");
+        const data = await res.json().catch(function () {
+          return {};
+        });
+        sheetsConfigured = Boolean(data.configured);
+      } catch {
+        sheetsConfigured = false;
+      }
+      updateSheetsUi();
+    }
+
+    function updateSheetsUi() {
+      if (!lastResult) {
+        sendSheetsBtn.disabled = true;
+        hideSheetsHint();
+        return;
+      }
+      const items = lastResult.actionItems || [];
+      if (!sheetsConfigured) {
+        sendSheetsBtn.disabled = true;
+        sheetsHint.hidden = false;
+        sheetsHint.textContent =
+          "Google Sheets is not configured on this server. Add credentials to your .env file.";
+        sheetsHint.classList.remove("success");
+        return;
+      }
+      if (items.length === 0) {
+        sendSheetsBtn.disabled = true;
+        sheetsHint.hidden = false;
+        sheetsHint.textContent = "No action items to send.";
+        sheetsHint.classList.remove("success");
+        return;
+      }
+      sendSheetsBtn.disabled = false;
+      if (!sheetsHint.classList.contains("success") || !sheetsHint.textContent.trim()) {
+        hideSheetsHint();
+      }
+    }
+
     function hideCopyHint() {
       copyHint.hidden = true;
       copyHint.textContent = "";
@@ -662,6 +728,54 @@
       }
       clearError();
       markdownOutput.value = buildMarkdown(lastResult);
+    });
+
+    sendSheetsBtn.addEventListener("click", async function () {
+      hideSheetsHint();
+      clearError();
+      if (!lastResult) {
+        showError("Run an analysis first so there are action items to send.");
+        return;
+      }
+      const items = lastResult.actionItems || [];
+      if (!sheetsConfigured) {
+        showSheetsHint(
+          "Google Sheets is not configured on this server. Add credentials to your .env file.",
+          false,
+        );
+        return;
+      }
+      if (items.length === 0) {
+        showSheetsHint("No action items to send.", false);
+        return;
+      }
+      sendSheetsBtn.disabled = true;
+      try {
+        const res = await fetch("/api/google-sheets/action-items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ actionItems: items }),
+        });
+        const data = await res.json().catch(function () {
+          return {};
+        });
+        if (!res.ok) {
+          showError(data.error || "Could not send to Google Sheets.");
+          updateSheetsUi();
+          return;
+        }
+        const n = typeof data.appended === "number" ? data.appended : items.length;
+        showSheetsHint(
+          n === 0
+            ? "No rows appended (empty list)."
+            : "Sent " + n + " action item(s) to Google Sheets.",
+          n > 0,
+        );
+      } catch (e) {
+        showError("Network error sending to Google Sheets. (" + String(e.message || e) + ")");
+      } finally {
+        updateSheetsUi();
+      }
     });
 
     copyMdBtn.addEventListener("click", async function () {
@@ -724,6 +838,7 @@
       const transcript = transcriptEl.value.trim();
       clearError();
       hideCopyHint();
+      hideSheetsHint();
       lastResult = null;
       markdownOutput.value = "";
       resultsEl.hidden = true;
@@ -759,12 +874,15 @@
         textTopics.textContent = data.keyTopicsSummary || "(none)";
         markdownOutput.value = "";
         resultsEl.hidden = false;
+        await refreshSheetsStatus();
       } catch (e) {
         showError("Network error: is the server running? (" + String(e.message || e) + ")");
       } finally {
         setLoading(false);
       }
     });
+
+    refreshSheetsStatus();
   </script>
 </body>
 </html>

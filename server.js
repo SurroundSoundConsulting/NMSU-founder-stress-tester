@@ -3,6 +3,9 @@
  *
  * Loads secrets from .env (see dotenv) and calls the OpenAI Chat Completions API.
  * Required env: OPENAI_API_KEY
+ * Optional Google Sheets (same .env): GOOGLE_SHEETS_SPREADSHEET_ID,
+ *   GOOGLE_SHEETS_TAB_NAME or GOOGLE_SHEETS_TAB,
+ *   GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_SERVICE_ACCOUNT_KEY_FILE or GOOGLE_SERVICE_ACCOUNT_JSON — see lib/googleSheets.js
  */
 
 // Load .env from this file's directory (project root), not from wherever the shell
@@ -34,6 +37,12 @@ if (
 }
 
 const express = require("express");
+const {
+  isGoogleSheetsConfigured,
+  appendActionItemsToSheet,
+  logGoogleSheetsStartupHint,
+  mapSheetsError,
+} = require("./lib/googleSheets");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -44,6 +53,37 @@ const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 app.use(express.json());
 
 app.use(express.static(path.join(__dirname, "public")));
+
+app.get("/api/google-sheets/status", (req, res) => {
+  res.json({ configured: isGoogleSheetsConfigured() });
+});
+
+/**
+ * POST /api/google-sheets/action-items
+ * Body: { "actionItems": [ { urgency, task, owner, dueOrNextStep }, ... ] }
+ */
+app.post("/api/google-sheets/action-items", async (req, res) => {
+  const items = req.body?.actionItems;
+  if (!Array.isArray(items)) {
+    return res.status(400).json({ error: "Missing or invalid 'actionItems' array in JSON body." });
+  }
+
+  if (!isGoogleSheetsConfigured()) {
+    return res.status(503).json({
+      error: "Google Sheets is not configured on this server.",
+      code: "SHEETS_NOT_CONFIGURED",
+    });
+  }
+
+  try {
+    const result = await appendActionItemsToSheet(items);
+    return res.json(result);
+  } catch (err) {
+    console.error("Google Sheets append error:", err?.message || err);
+    const mapped = mapSheetsError(err);
+    return res.status(mapped.status).json(mapped.body);
+  }
+});
 
 function buildHiveMindSystemPrompt() {
   return [
@@ -243,7 +283,19 @@ app.post("/hive-mind", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
   console.log("Using model:", MODEL);
+  logGoogleSheetsStartupHint();
+});
+
+server.on("error", (err) => {
+  if (err && err.code === "EADDRINUSE") {
+    console.error(
+      `Port ${PORT} is already in use. Stop the other server (e.g. run: lsof -i :${PORT} then kill <PID>), or start with a different port: PORT=3001 npm start`,
+    );
+  } else {
+    console.error(err);
+  }
+  process.exit(1);
 });
