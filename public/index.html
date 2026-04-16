@@ -297,14 +297,102 @@
       color: var(--hive-black);
       font-weight: 800;
     }
-    table.action-items tbody tr:nth-child(even) {
-      background: rgba(255, 251, 235, 0.65);
+    table.action-items tbody tr.action-row.status-not-started {
+      background: rgba(255, 251, 235, 0.55);
+    }
+    table.action-items tbody tr.action-row.status-in-progress {
+      background: rgba(219, 234, 254, 0.92);
+    }
+    table.action-items tbody tr.action-row.status-done {
+      background: rgba(220, 252, 231, 0.95);
+    }
+    table.action-items tbody tr.action-row.status-blocked {
+      background: rgba(254, 226, 226, 0.95);
     }
     table.action-items td.num {
       white-space: nowrap;
-      width: 4rem;
+      width: 4.25rem;
       font-weight: 700;
       color: #713f12;
+    }
+    table.action-items .cell-input {
+      width: 100%;
+      min-width: 0;
+      max-width: 100%;
+      margin: 0;
+      padding: 0.35rem 0.45rem;
+      font: inherit;
+      font-size: 0.9rem;
+      color: var(--text);
+      background: #fffef8;
+      border: 2px solid #c9a227;
+      border-radius: 6px;
+      box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
+    }
+    table.action-items .cell-input:focus {
+      outline: none;
+      border-color: var(--hive-black);
+      box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.55);
+    }
+    table.action-items .cell-input--urgency {
+      max-width: 4rem;
+      text-align: center;
+      font-weight: 700;
+      color: #713f12;
+    }
+    table.action-items .cell-input--status {
+      cursor: pointer;
+      font-weight: 600;
+      padding-right: 1.75rem;
+      background-color: #fffef8;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23451a03' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 0.45rem center;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+    table.action-items td.col-status {
+      min-width: 8.5rem;
+    }
+    table.action-items td.col-why {
+      max-width: 11rem;
+      font-size: 0.88rem;
+      vertical-align: top;
+    }
+    table.action-items .why-details {
+      margin: 0;
+      max-width: 100%;
+    }
+    table.action-items .why-details summary {
+      cursor: pointer;
+      font-weight: 700;
+      color: #713f12;
+      list-style: none;
+    }
+    table.action-items .why-details summary::-webkit-details-marker {
+      display: none;
+    }
+    table.action-items .why-details summary::before {
+      content: "▸ ";
+      display: inline-block;
+      transition: transform 0.15s ease;
+    }
+    table.action-items .why-details[open] summary::before {
+      transform: rotate(90deg);
+    }
+    table.action-items .why-body {
+      margin: 0.4rem 0 0;
+      padding: 0.45rem 0.5rem;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.85);
+      border: 1px solid #e7d49a;
+      line-height: 1.4;
+      color: var(--text);
+    }
+    .action-items-edit-hint {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin: 0 0 0.5rem 0;
     }
     .markdown-export {
       margin-top: 1.25rem;
@@ -340,6 +428,20 @@
     }
     .markdown-export .export-actions button {
       margin-top: 0;
+    }
+    .sheets-export-hint {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin: 0 0 0.5rem 0;
+    }
+    .sheets-export-msg {
+      font-size: 0.92rem;
+      color: #14532d;
+      background: rgba(220, 252, 231, 0.9);
+      border: 1px solid #86efac;
+      border-radius: 8px;
+      padding: 0.5rem 0.75rem;
+      margin-top: 0.5rem;
     }
     #markdownOut {
       min-height: 10rem;
@@ -408,14 +510,19 @@
       <div id="results" hidden>
         <section aria-labelledby="h-actions">
           <h2 id="h-actions">Action items</h2>
+          <p class="action-items-edit-hint" id="actionItemsEditHint" hidden>
+            Edit urgency, owner, due / next step, or status in the table — updates apply right away.
+          </p>
           <div class="table-wrap">
             <table class="action-items" aria-describedby="h-actions">
               <thead>
                 <tr>
                   <th scope="col">Urgency (0–9)</th>
+                  <th scope="col">Why urgent</th>
                   <th scope="col">Task</th>
                   <th scope="col">Owner</th>
                   <th scope="col">Due / Next step</th>
+                  <th scope="col">Status</th>
                 </tr>
               </thead>
               <tbody id="actionItemsBody"></tbody>
@@ -440,10 +547,15 @@
           <p class="hint">
             Create a copy-paste friendly markdown version of the results above.
           </p>
+          <p class="sheets-export-hint" id="sheetsExportHint" hidden></p>
           <div class="export-actions">
             <button type="button" class="btn btn-secondary" id="generateMd" disabled>Generate Markdown</button>
             <button type="button" class="btn btn-secondary" id="copyMd" disabled>Copy Markdown</button>
+            <button type="button" class="btn btn-secondary" id="sendSheetsBtn" disabled>
+              Send to Google Sheet
+            </button>
           </div>
+          <p class="sheets-export-msg" id="sheetsExportMsg" hidden role="status" aria-live="polite"></p>
           <label for="markdownOut">Markdown output</label>
           <textarea
             id="markdownOut"
@@ -470,9 +582,42 @@
     const generateMdBtn = document.getElementById("generateMd");
     const copyMdBtn = document.getElementById("copyMd");
     const markdownOutEl = document.getElementById("markdownOut");
+    const actionItemsEditHint = document.getElementById("actionItemsEditHint");
+    const sendSheetsBtn = document.getElementById("sendSheetsBtn");
+    const sheetsExportHint = document.getElementById("sheetsExportHint");
+    const sheetsExportMsg = document.getElementById("sheetsExportMsg");
 
-    /** Last successful /analyze response; used for markdown export. */
+    /** Last successful /analyze response (deep copy; action_items rows are editable); used for markdown export. */
     let lastAnalysis = null;
+    /** From GET /api/sheets-status — optional Google Sheets integration. */
+    let sheetsConfigured = false;
+
+    function refreshSheetsUi() {
+      sendSheetsBtn.disabled = !sheetsConfigured || !lastAnalysis;
+      if (sheetsConfigured) {
+        sheetsExportHint.hidden = true;
+        sendSheetsBtn.title = "Append current action items to your spreadsheet (append-only).";
+      } else {
+        sheetsExportHint.hidden = false;
+        sheetsExportHint.textContent =
+          "Google Sheets is off: set GOOGLE_SHEETS_SPREADSHEET_ID and GOOGLE_APPLICATION_CREDENTIALS in .env — see sheets-export.js.";
+        sendSheetsBtn.title =
+          "Configure Google Sheets in .env first (see sheets-export.js in the project root).";
+      }
+    }
+
+    async function loadSheetsStatus() {
+      try {
+        const res = await fetch("/api/sheets-status");
+        const data = await res.json().catch(function () {
+          return {};
+        });
+        sheetsConfigured = !!data.configured;
+      } catch (e) {
+        sheetsConfigured = false;
+      }
+      refreshSheetsUi();
+    }
 
     function setLoading(isLoading) {
       submitBtn.disabled = isLoading;
@@ -505,39 +650,245 @@
       });
     }
 
+    function clampUrgencyUi(value) {
+      const x = parseInt(String(value).trim(), 10);
+      if (isNaN(x)) {
+        return 0;
+      }
+      return Math.max(0, Math.min(9, x));
+    }
+
+    var ACTION_STATUSES = ["Not started", "In progress", "Done", "Blocked"];
+
+    function normalizeActionStatus(value) {
+      var t = String(value != null ? value : "").trim();
+      return ACTION_STATUSES.indexOf(t) !== -1 ? t : "Not started";
+    }
+
+    function statusRowClass(status) {
+      var s = normalizeActionStatus(status);
+      if (s === "In progress") {
+        return "status-in-progress";
+      }
+      if (s === "Done") {
+        return "status-done";
+      }
+      if (s === "Blocked") {
+        return "status-blocked";
+      }
+      return "status-not-started";
+    }
+
+    function ensureActionItemDefaults() {
+      if (!lastAnalysis || !Array.isArray(lastAnalysis.action_items)) {
+        return;
+      }
+      lastAnalysis.action_items.forEach(function (row) {
+        row.status = normalizeActionStatus(row.status);
+        var why = String(row.why_this_is_urgent != null ? row.why_this_is_urgent : "").trim();
+        row.why_this_is_urgent = why || "—";
+      });
+    }
+
     function fillActionTable(rows) {
       actionItemsBody.innerHTML = "";
-      (rows || []).forEach(function (row) {
+      const list = rows || [];
+      const showHint = list.length > 0;
+      actionItemsEditHint.hidden = !showHint;
+
+      list.forEach(function (row, index) {
         const tr = document.createElement("tr");
+        tr.setAttribute("data-row-index", String(index));
+        tr.className = "action-row " + statusRowClass(row.status);
+
         const u = document.createElement("td");
         u.className = "num";
-        u.textContent = String(row.urgency != null ? row.urgency : "");
+        const urgencyInput = document.createElement("input");
+        urgencyInput.type = "number";
+        urgencyInput.min = "0";
+        urgencyInput.max = "9";
+        urgencyInput.step = "1";
+        urgencyInput.className = "cell-input cell-input--urgency";
+        urgencyInput.setAttribute("data-field", "urgency");
+        urgencyInput.setAttribute("aria-label", "Urgency for row " + (index + 1));
+        urgencyInput.value = String(clampUrgencyUi(row.urgency != null ? row.urgency : 0));
+        u.appendChild(urgencyInput);
+
+        const whyTd = document.createElement("td");
+        whyTd.className = "col-why";
+        var whyText = row.why_this_is_urgent != null ? String(row.why_this_is_urgent).trim() : "";
+        if (!whyText) {
+          whyText = "—";
+        }
+        const whyDetails = document.createElement("details");
+        whyDetails.className = "why-details";
+        const whySummary = document.createElement("summary");
+        whySummary.textContent = "Why urgent";
+        whySummary.setAttribute(
+          "aria-label",
+          "Show or hide why this urgency score for row " + (index + 1),
+        );
+        const whyP = document.createElement("p");
+        whyP.className = "why-body";
+        whyP.textContent = whyText;
+        whyDetails.appendChild(whySummary);
+        whyDetails.appendChild(whyP);
+        whyTd.appendChild(whyDetails);
+
         const t = document.createElement("td");
         t.textContent = row.task != null ? String(row.task) : "";
+
         const o = document.createElement("td");
-        o.textContent = row.owner != null ? String(row.owner) : "";
+        const ownerInput = document.createElement("input");
+        ownerInput.type = "text";
+        ownerInput.className = "cell-input";
+        ownerInput.setAttribute("data-field", "owner");
+        ownerInput.setAttribute("aria-label", "Owner for row " + (index + 1));
+        ownerInput.value = row.owner != null ? String(row.owner) : "";
+        o.appendChild(ownerInput);
+
         const d = document.createElement("td");
-        d.textContent = row.due_next_step != null ? String(row.due_next_step) : "";
+        const dueInput = document.createElement("input");
+        dueInput.type = "text";
+        dueInput.className = "cell-input";
+        dueInput.setAttribute("data-field", "due_next_step");
+        dueInput.setAttribute("aria-label", "Due or next step for row " + (index + 1));
+        dueInput.value = row.due_next_step != null ? String(row.due_next_step) : "";
+        d.appendChild(dueInput);
+
+        const st = document.createElement("td");
+        st.className = "col-status";
+        const statusSelect = document.createElement("select");
+        statusSelect.className = "cell-input cell-input--status";
+        statusSelect.setAttribute("data-field", "status");
+        statusSelect.setAttribute("aria-label", "Status for row " + (index + 1));
+        ACTION_STATUSES.forEach(function (label) {
+          const opt = document.createElement("option");
+          opt.value = label;
+          opt.textContent = label;
+          statusSelect.appendChild(opt);
+        });
+        statusSelect.value = normalizeActionStatus(row.status);
+        st.appendChild(statusSelect);
+
         tr.appendChild(u);
+        tr.appendChild(whyTd);
         tr.appendChild(t);
         tr.appendChild(o);
         tr.appendChild(d);
+        tr.appendChild(st);
         actionItemsBody.appendChild(tr);
       });
     }
+
+    function syncActionItemField(rowIndex, field, rawValue) {
+      if (!lastAnalysis || !Array.isArray(lastAnalysis.action_items)) {
+        return;
+      }
+      const row = lastAnalysis.action_items[rowIndex];
+      if (!row) {
+        return;
+      }
+      if (field === "urgency") {
+        row.urgency = clampUrgencyUi(rawValue);
+        return;
+      }
+      if (field === "owner") {
+        row.owner = String(rawValue);
+        return;
+      }
+      if (field === "due_next_step") {
+        row.due_next_step = String(rawValue);
+        return;
+      }
+      if (field === "status") {
+        row.status = normalizeActionStatus(rawValue);
+      }
+    }
+
+    actionItemsBody.addEventListener("input", function (e) {
+      const el = e.target;
+      if (!el.classList.contains("cell-input")) {
+        return;
+      }
+      const tr = el.closest("tr");
+      if (!tr) {
+        return;
+      }
+      const idx = parseInt(tr.getAttribute("data-row-index"), 10);
+      if (isNaN(idx)) {
+        return;
+      }
+      const field = el.getAttribute("data-field");
+      if (!field) {
+        return;
+      }
+      syncActionItemField(idx, field, el.value);
+    });
+
+    actionItemsBody.addEventListener("change", function (e) {
+      const el = e.target;
+      if (el.tagName !== "SELECT" || !el.classList.contains("cell-input--status")) {
+        return;
+      }
+      const tr = el.closest("tr");
+      if (!tr) {
+        return;
+      }
+      const idx = parseInt(tr.getAttribute("data-row-index"), 10);
+      if (isNaN(idx)) {
+        return;
+      }
+      syncActionItemField(idx, "status", el.value);
+      tr.className = "action-row " + statusRowClass(el.value);
+    });
+
+    actionItemsBody.addEventListener(
+      "blur",
+      function (e) {
+        const el = e.target;
+        if (!el.classList.contains("cell-input--urgency")) {
+          return;
+        }
+        const tr = el.closest("tr");
+        if (!tr) {
+          return;
+        }
+        const idx = parseInt(tr.getAttribute("data-row-index"), 10);
+        if (isNaN(idx) || !lastAnalysis || !lastAnalysis.action_items[idx]) {
+          return;
+        }
+        const v = clampUrgencyUi(el.value);
+        lastAnalysis.action_items[idx].urgency = v;
+        el.value = String(v);
+      },
+      true,
+    );
 
     function resetMarkdownExport() {
       lastAnalysis = null;
       markdownOutEl.value = "";
       copyMdBtn.disabled = true;
       generateMdBtn.disabled = true;
+      actionItemsEditHint.hidden = true;
+      sheetsExportMsg.hidden = true;
+      sheetsExportMsg.textContent = "";
+      refreshSheetsUi();
     }
 
     function setAnalysisResult(data) {
-      lastAnalysis = data;
+      try {
+        lastAnalysis = JSON.parse(JSON.stringify(data));
+      } catch (err) {
+        lastAnalysis = data;
+      }
+      ensureActionItemDefaults();
       markdownOutEl.value = "";
       copyMdBtn.disabled = true;
       generateMdBtn.disabled = false;
+      sheetsExportMsg.hidden = true;
+      sheetsExportMsg.textContent = "";
+      refreshSheetsUi();
     }
 
     generateMdBtn.addEventListener("click", async function () {
@@ -593,6 +944,42 @@
       }
     });
 
+    sendSheetsBtn.addEventListener("click", async function () {
+      if (!lastAnalysis || !sheetsConfigured) {
+        return;
+      }
+      clearError();
+      sheetsExportMsg.hidden = true;
+      sheetsExportMsg.textContent = "";
+      sendSheetsBtn.disabled = true;
+      try {
+        const res = await fetch("/api/sheets-export-action-items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action_items: lastAnalysis.action_items }),
+        });
+        const data = await res.json().catch(function () {
+          return {};
+        });
+        if (data.success) {
+          var n = data.appended != null ? data.appended : 0;
+          sheetsExportMsg.textContent =
+            n === 0 ? "No rows to send." : "Sent " + n + " row(s) to Google Sheet.";
+          sheetsExportMsg.hidden = false;
+        } else if (data.code === "not_configured") {
+          showError(data.message || "Google Sheets is not configured.");
+        } else {
+          showError(data.message || "Could not write to Google Sheet.");
+        }
+      } catch (e) {
+        showError("Network error: " + String(e.message || e));
+      } finally {
+        refreshSheetsUi();
+      }
+    });
+
+    loadSheetsStatus();
+
     submitBtn.addEventListener("click", async function () {
       const text = transcriptEl.value.trim();
       clearError();
@@ -621,11 +1008,11 @@
           return;
         }
 
-        fillActionTable(data.action_items);
+        setAnalysisResult(data);
+        fillActionTable(lastAnalysis.action_items);
         fillList(listInsights, data.insights);
         fillList(listDebate, data.points_of_debate);
         fillList(listTopics, data.key_topics_summary);
-        setAnalysisResult(data);
         resultsEl.hidden = false;
       } catch (e) {
         showError("Network error: is the server running? (" + String(e.message || e) + ")");

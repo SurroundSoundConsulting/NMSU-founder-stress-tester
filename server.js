@@ -3,6 +3,12 @@
  *
  * Loads secrets from .env (see dotenv) and calls the OpenAI Chat Completions API.
  * Required env: OPENAI_API_KEY
+ *
+ * Optional Google Sheets export (action items only):
+ * - GOOGLE_SHEETS_SPREADSHEET_ID — spreadsheet id from the Google Sheet URL
+ * - GOOGLE_APPLICATION_CREDENTIALS — path to service account JSON key file
+ * - GOOGLE_SHEETS_TAB_NAME — optional, default Sheet1
+ * Full setup steps: see sheets-export.js at the project root.
  */
 
 // Load .env from this file's directory (project root), not from wherever the shell
@@ -34,6 +40,7 @@ if (
 }
 
 const express = require("express");
+const sheetsExport = require("./sheets-export");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -103,7 +110,7 @@ function buildDateHints(ref) {
 }
 
 /**
- * Ask the model to return ONLY JSON. Internal fields are stripped in parseHiveMindPayload.
+ * Ask the model to return ONLY JSON.
  * response_format: json_object helps the model stay valid JSON.
  */
 function buildSystemPrompt() {
@@ -119,17 +126,14 @@ function buildSystemPrompt() {
     "",
     "ACTION ITEMS — columns (map to JSON keys exactly):",
     '- Urgency (0–9, 9 = highest) → key "urgency" (integer).',
+    '- Why this score → key "why_this_is_urgent" (string): ONE short, readable phrase (roughly 5–14 words) explaining why the urgency number fits.',
+    '  Examples of tone: "Due before next client session", "Blocks launch prep", "External-facing deliverable", "Important but no fixed deadline", "Low priority follow-up".',
+    '  Must match the urgency score you chose. No bullet lists or long paragraphs.',
     '- Task → key "task" (string).',
     '- Owner → key "owner" (string).',
     '- Due / Next Step → key "due_next_step" (string).',
-    '- INTERNAL ONLY (stripped before UI): key "urgency_justification" (string, one short paragraph).',
-    "For EVERY action item you MUST output urgency_justification BEFORE you finalize urgency.",
-    "In urgency_justification, briefly state how each of these four factors applies (even if \"low\" or \"none\"):",
-    "(1) Time sensitivity — real deadline, near-term milestone, or timing pressure?",
-    "(2) External exposure — client, partner, public deliverable, investor, regulator, or outside-facing commitment?",
-    "(3) Dependency chain — blocking other work, decisions, or people?",
-    "(4) Strategic weight — central to launch, revenue, or a stated priority?",
-    "Then choose urgency using that reasoning. This field must never appear in user-facing output; the server removes it.",
+    "Use this internal checklist when choosing urgency (do not paste this list into why_this_is_urgent):",
+    "time sensitivity, external exposure, dependency chain, strategic weight — then compress the reason into why_this_is_urgent.",
     "",
     "URGENCY SCORING — use structured judgment, not vibes:",
     "- 9 = true fire: immediate risk, deadline collision, serious blocker, or equivalent.",
@@ -168,7 +172,7 @@ function buildSystemPrompt() {
     "- points_of_debate: disagreements, unresolved questions, tension.",
     "- key_topics_summary: short theme labels.",
     "- If insights, points_of_debate, or key_topics_summary would be empty, use a single-element array: [\"None noted\"].",
-    "- If there are no action items, return exactly one action row: urgency 0, urgency_justification \"No actionable items.\", task \"None noted\", owner \"TBD\", due_next_step \"None noted\".",
+    "- If there are no action items, return exactly one action row: urgency 0, why_this_is_urgent \"No actionable items.\", task \"None noted\", owner \"TBD\", due_next_step \"None noted\".",
   ].join("\n");
 }
 
@@ -189,6 +193,7 @@ function normalizeStringArray(arr, fallbackSingle) {
 
 /**
  * Normalize model output into { action_items, insights, points_of_debate, key_topics_summary }.
+ * Each action item includes why_this_is_urgent for display and export.
  */
 function parseHiveMindPayload(raw) {
   let data = raw;
@@ -203,9 +208,10 @@ function parseHiveMindPayload(raw) {
   if (Array.isArray(data.action_items)) {
     action_items = data.action_items.map((row) => {
       const o = row && typeof row === "object" ? row : {};
-      // urgency_justification is for model reasoning only — never expose to the client
+      const why = String(o.why_this_is_urgent ?? "").trim();
       return {
         urgency: clampUrgency(o.urgency),
+        why_this_is_urgent: why || "—",
         task: String(o.task ?? "").trim() || NONE,
         owner: String(o.owner ?? "").trim() || TBD,
         due_next_step: String(o.due_next_step ?? "").trim() || NONE,
@@ -215,6 +221,7 @@ function parseHiveMindPayload(raw) {
 
   const placeholderRow = {
     urgency: 0,
+    why_this_is_urgent: "—",
     task: NONE,
     owner: TBD,
     due_next_step: NONE,
@@ -334,6 +341,20 @@ app.post("/analyze", async (req, res) => {
   }
 });
 
+/** UI-only status on action items (export / client); default when missing or invalid. */
+const ACTION_STATUS_DEFAULT = "Not started";
+const ACTION_STATUSES_EXPORT = new Set(["Not started", "In progress", "Done", "Blocked"]);
+
+function normalizeActionStatusForExport(value) {
+  const t = String(value ?? "").trim();
+  return ACTION_STATUSES_EXPORT.has(t) ? t : ACTION_STATUS_DEFAULT;
+}
+
+function whyUrgentForExport(value) {
+  const t = String(value ?? "").trim();
+  return t || "—";
+}
+
 /** One line of text safe inside a GFM pipe table cell. */
 function escapeMarkdownTableCell(value) {
   return String(value ?? "")
@@ -357,19 +378,28 @@ function buildHiveMindMarkdown(data) {
   const lines = [];
   lines.push("## Action Items");
   lines.push("");
-  lines.push("| Urgency | Task | Owner | Due / Next Step |");
-  lines.push("| --- | --- | --- | --- |");
+  lines.push("| Urgency | Why urgent | Task | Owner | Due / Next Step | Status |");
+  lines.push("| --- | --- | --- | --- | --- | --- |");
   const rows = Array.isArray(data.action_items) ? data.action_items : [];
   if (rows.length === 0) {
     lines.push(
       "| " +
-        ["", "None noted", "TBD", "None noted"].map(escapeMarkdownTableCell).join(" | ") +
+        ["", "—", "None noted", "TBD", "None noted", ACTION_STATUS_DEFAULT]
+          .map(escapeMarkdownTableCell)
+          .join(" | ") +
         " |",
     );
   } else {
     rows.forEach(function (row) {
       const r = row && typeof row === "object" ? row : {};
-      const cells = [r.urgency, r.task, r.owner, r.due_next_step].map(escapeMarkdownTableCell);
+      const cells = [
+        r.urgency,
+        whyUrgentForExport(r.why_this_is_urgent),
+        r.task,
+        r.owner,
+        r.due_next_step,
+        normalizeActionStatusForExport(r.status),
+      ].map(escapeMarkdownTableCell);
       lines.push("| " + cells.join(" | ") + " |");
     });
   }
@@ -428,6 +458,51 @@ app.post("/export-markdown", (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Could not build markdown export." });
+  }
+});
+
+/**
+ * GET /api/sheets-status
+ * Returns whether optional Google Sheets export is configured (see sheets-export.js).
+ */
+app.get("/api/sheets-status", (req, res) => {
+  res.json({ configured: sheetsExport.isSheetsConfigured() });
+});
+
+/**
+ * POST /api/sheets-export-action-items
+ * Body: { "action_items": [ ... ] } — same row shape as the Analyze UI (includes status, why_this_is_urgent, etc.)
+ * When not configured: HTTP 200 with success: false, code: not_configured (app stays usable without Sheets).
+ */
+app.post("/api/sheets-export-action-items", async (req, res) => {
+  if (!sheetsExport.isSheetsConfigured()) {
+    return res.status(200).json({
+      success: false,
+      code: "not_configured",
+      message:
+        "Google Sheets export is not configured. Set GOOGLE_SHEETS_SPREADSHEET_ID and GOOGLE_APPLICATION_CREDENTIALS in .env (see comments in sheets-export.js).",
+    });
+  }
+
+  const body = req.body;
+  if (!body || typeof body !== "object" || Array.isArray(body) || !Array.isArray(body.action_items)) {
+    return res.status(400).json({
+      success: false,
+      code: "invalid_body",
+      message: 'Expected JSON body with an "action_items" array.',
+    });
+  }
+
+  try {
+    const result = await sheetsExport.appendActionItemsToSheet(body.action_items);
+    return res.json({ success: true, appended: result.appended });
+  } catch (err) {
+    console.error("Google Sheets append failed:", err);
+    return res.status(200).json({
+      success: false,
+      code: "sheets_error",
+      message: String(err?.message || err),
+    });
   }
 });
 
