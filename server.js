@@ -1,5 +1,5 @@
 /**
- * Founder Stress Tester — backend (Express)
+ * Hive Mind — backend (Express)
  *
  * Loads secrets from .env (see dotenv) and calls the OpenAI Chat Completions API.
  * Required env: OPENAI_API_KEY
@@ -38,102 +38,132 @@ const express = require("express");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// OpenAI REST endpoint (same for all models you pick below)
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
-// Use a small, capable model; override with OPENAI_MODEL in .env if you like
 const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-// Parse JSON bodies (for POST /stress-test)
 app.use(express.json());
 
-// Serve the frontend from /public
 app.use(express.static(path.join(__dirname, "public")));
 
-/** Allowed values for POST body { mode: "..." } */
-const STRESS_MODES = new Set(["brutal", "balanced", "supportive"]);
-
-/**
- * How hard to "stress" the founder's idea in the system prompt.
- * @param {"brutal"|"balanced"|"supportive"} mode
- */
-function getToneInstructions(mode) {
-  if (mode === "brutal") {
-    return [
-      "Tone: BRUTAL.",
-      "Be blunt and skeptical. Surface the worst-case failures, harsh truths, and reasons customers or investors might say no.",
-      "Do not soften criticism or add false reassurance. Stay constructive enough to be useful, but prioritize cold realism.",
-    ].join(" ");
-  }
-  if (mode === "supportive") {
-    return [
-      "Tone: SUPPORTIVE.",
-      "Be encouraging and constructive. Acknowledge real strengths where they exist.",
-      "Frame risks as challenges to navigate, not personal attacks. Stay honest—do not invent hype or hide real risks.",
-    ].join(" ");
-  }
-  // balanced (default)
+function buildHiveMindSystemPrompt() {
   return [
-    "Tone: BALANCED.",
-    "Be fair and practical: mix strengths and weaknesses without leaning overly negative or positive.",
-  ].join(" ");
+    "You are an expert meeting analyst. Extract decision-oriented, high-signal structure from transcripts or notes.",
+    "",
+    "Output: one JSON object only (no markdown, no prose outside JSON). Top-level keys:",
+    '- "actionItems": array of objects (see Action Items rules below)',
+    '- "insights": array of strings — non-obvious takeaways, patterns, implications (not a task list)',
+    '- "pointsOfDebate": array of strings — disagreements, unresolved questions, contested points',
+    '- "keyTopicsSummary": one string — concise synthesis of main themes',
+    "",
+    "=== ACTION ITEMS (strict) ===",
+    "Each action item object MUST use exactly these fields (names matter):",
+    '- "urgency": integer 0–9 (9 = highest). See Urgency Process below.',
+    '- "task": string — the work to do.',
+    '- "owner": string — responsible person/role if stated; otherwise "TBD".',
+    '- "dueOrNextStep": string — the "Due / Next Step" column: either a concrete date, a date plus context, or a next-step line when no real date exists.',
+    '- "urgencyJustification": string — REQUIRED for your reasoning only: 1–3 short sentences. For EACH item, FIRST briefly note evidence for the four factors (time sensitivity, external exposure, dependency chain, strategic weight), THEN state why the final urgency number matches the scale below. This field is stripped before display; it exists to force rigorous scoring.',
+    "",
+    "What counts as an action item:",
+    "- Include only real next steps: deliverables, follow-ups, commitments, decision-dependent tasks, or concrete work items assigned or clearly implied.",
+    "- Do NOT inflate the list: skip pure discussion, background context, opinions, or topics with no actionable outcome.",
+    "- Do NOT turn every mentioned theme into a task.",
+    "",
+    "Task writing (Due / Next Step column is separate; \"task\" is the action itself):",
+    "- Imperative mood; start with a strong verb (e.g. Send, Draft, Schedule, Confirm, Ship).",
+    "- Specific enough that someone could execute without re-asking what was meant.",
+    '- Avoid vague verbs like "discuss", "handle", "look into" unless the transcript literally gives no clearer action — if so, still make the task as concrete as the text allows.',
+    "",
+    "dueOrNextStep rules:",
+    "- When you can resolve a relative time phrase, use ISO date YYYY-MM-DD, optionally followed by brief context after an em dash, e.g. \"2026-09-23 — before next sales sync\".",
+    "- When a real calendar due date is not available, do NOT invent a fake date. Use a meaningful next-step description, e.g. \"None noted — follow up with team\" or \"None noted — awaiting owner assignment\".",
+    "- Prefer one clear line; combine date + context when both apply.",
+    "",
+    "=== URGENCY PROCESS (mandatory before setting urgency) ===",
+    "For EACH action item, mentally evaluate these four factors using only transcript evidence (not general importance):",
+    "1) Time sensitivity — real deadline, near-term milestone, or implied timing pressure?",
+    "2) External exposure — client, partner, public deliverable, investor, regulator, or other outside-facing commitment?",
+    "3) Dependency chain — blocking other work, decisions, or people?",
+    "4) Strategic weight — central to a named priority, launch, revenue goal, or major initiative?",
+    "",
+    "Then assign urgency using this scale (do not inflate):",
+    "- 9 = true fire: immediate risk, hard deadline collision, serious blocker, or severe external consequence if not done now.",
+    "- 7–8 = high: clear time sensitivity AND/OR strong external or blocking impact; must move soon.",
+    "- 5–6 = important but not immediately pressing; should happen on a normal horizon.",
+    "- 3–4 = useful, can wait briefly; low time pressure.",
+    "- 0–2 = optional, exploratory, nice-to-have, or low consequence unless the transcript clearly raises the bar.",
+    "",
+    "Anti-inflation rules:",
+    "- Do NOT assign high urgency because a topic sounds important in the abstract.",
+    "- Do NOT assign high urgency without at least one of: real timing pressure, external consequence, or blocking impact evidenced in the text.",
+    "- Internal ideas, general follow-ups, and polish items should usually score low–mid unless the transcript clearly signals urgency drivers.",
+    "- If the meeting feels intense but there is no concrete urgency driver, keep scores moderate.",
+    "",
+    "After internal reasoning, set \"urgency\" to match urgencyJustification; they must be consistent.",
+  ].join("\n");
+}
+
+function clampUrgency(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return 0;
+  return Math.max(0, Math.min(9, Math.round(x)));
 }
 
 /**
- * Ask the model to return ONLY JSON matching our UI shape.
- * response_format: json_object helps the model stay valid JSON.
- * @param {"brutal"|"balanced"|"supportive"} mode
+ * Normalize model output into our API shape.
  */
-function buildSystemPrompt(mode) {
-  return [
-    "You are a practical advisor helping founders stress-test startup ideas.",
-    getToneInstructions(mode),
-    "Reply with a single JSON object (no markdown, no extra text) with exactly these keys:",
-    '- "coreAssumptions": array of strings (3–6 short bullets the idea depends on)',
-    '- "majorRisks": array of strings (3–6 concrete risks: market, execution, competition, regulation, etc.)',
-    '- "fastestValidationTest": one string describing the cheapest, fastest experiment to test the riskiest assumption',
-    "Be specific to the idea; avoid generic fluff.",
-  ].join(" ");
-}
-
-/**
- * Normalize whatever the model returned into { coreAssumptions, majorRisks, fastestValidationTest }.
- */
-function parseStressTestPayload(raw) {
+function parseHiveMindPayload(raw) {
   let data = raw;
   if (typeof data === "string") {
     data = JSON.parse(data);
   }
-  const coreAssumptions = Array.isArray(data.coreAssumptions)
-    ? data.coreAssumptions.map(String)
+
+  const rawItems = Array.isArray(data.actionItems) ? data.actionItems : [];
+  const actionItems = rawItems.map(function (row) {
+    const task = typeof row.task === "string" ? row.task.trim() : String(row.task || "").trim();
+    let owner =
+      typeof row.owner === "string" && row.owner.trim() ? row.owner.trim() : "TBD";
+    const dueRaw =
+      typeof row.dueOrNextStep === "string" && row.dueOrNextStep.trim()
+        ? row.dueOrNextStep.trim()
+        : typeof row.dateDue === "string" && row.dateDue.trim()
+          ? row.dateDue.trim()
+          : "";
+    const dueOrNextStep = dueRaw || "None noted";
+    // urgencyJustification is for model reasoning only — never sent to the client
+    return {
+      urgency: clampUrgency(row.urgency),
+      task: task || "(unspecified task)",
+      owner,
+      dueOrNextStep,
+    };
+  });
+
+  const insights = Array.isArray(data.insights) ? data.insights.map(String) : [];
+  const pointsOfDebate = Array.isArray(data.pointsOfDebate)
+    ? data.pointsOfDebate.map(String)
     : [];
-  const majorRisks = Array.isArray(data.majorRisks) ? data.majorRisks.map(String) : [];
-  const fastestValidationTest =
-    typeof data.fastestValidationTest === "string" ? data.fastestValidationTest : "";
-  return { coreAssumptions, majorRisks, fastestValidationTest };
+  const keyTopicsSummary =
+    typeof data.keyTopicsSummary === "string" ? data.keyTopicsSummary : String(data.keyTopicsSummary || "");
+
+  return { actionItems, insights, pointsOfDebate, keyTopicsSummary };
+}
+
+function formatReferenceDateForPrompt() {
+  const now = new Date();
+  const iso = now.toISOString().slice(0, 10);
+  const weekday = now.toLocaleDateString("en-US", { weekday: "long" });
+  return `${iso} (${weekday})`;
 }
 
 /**
- * POST /stress-test
- * Body: { "idea": "string", "mode"?: "brutal" | "balanced" | "supportive" }
- * Response: { coreAssumptions: string[], majorRisks: string[], fastestValidationTest: string }
+ * POST /hive-mind
+ * Body: { "transcript": "string" }
  */
-app.post("/stress-test", async (req, res) => {
-  const idea = req.body?.idea;
+app.post("/hive-mind", async (req, res) => {
+  const transcript = req.body?.transcript;
 
-  if (!idea || typeof idea !== "string" || !idea.trim()) {
-    return res.status(400).json({ error: "Missing or invalid 'idea' in JSON body." });
-  }
-
-  // Stress test mode (optional; default balanced)
-  let mode = "balanced";
-  if (req.body?.mode !== undefined && req.body?.mode !== null && String(req.body.mode).trim() !== "") {
-    const m = String(req.body.mode).toLowerCase();
-    if (!STRESS_MODES.has(m)) {
-      return res.status(400).json({
-        error: 'Invalid "mode". Use "brutal", "balanced", or "supportive".',
-      });
-    }
-    mode = m;
+  if (!transcript || typeof transcript !== "string" || !transcript.trim()) {
+    return res.status(400).json({ error: "Missing or invalid 'transcript' in JSON body." });
   }
 
   const apiKey = process.env.OPENAI_API_KEY;
@@ -143,6 +173,8 @@ app.post("/stress-test", async (req, res) => {
         "OPENAI_API_KEY is not set. Create a .env file in the project root with OPENAI_API_KEY=your_key.",
     });
   }
+
+  const referenceDate = formatReferenceDateForPrompt();
 
   try {
     const response = await fetch(OPENAI_URL, {
@@ -154,14 +186,18 @@ app.post("/stress-test", async (req, res) => {
       body: JSON.stringify({
         model: MODEL,
         messages: [
-          { role: "system", content: buildSystemPrompt(mode) },
+          { role: "system", content: buildHiveMindSystemPrompt() },
           {
             role: "user",
-            content: `Stress test mode: ${mode}. Analyze this startup idea and respond with JSON only:\n\n${idea.trim()}`,
+            content: [
+              `Reference date for resolving relative deadlines: ${referenceDate}.`,
+              "Analyze the following meeting transcript or notes and respond with JSON only:\n\n",
+              transcript.trim(),
+            ].join(""),
           },
         ],
         response_format: { type: "json_object" },
-        temperature: 0.6,
+        temperature: 0.3,
       }),
     });
 
@@ -190,10 +226,10 @@ app.post("/stress-test", async (req, res) => {
 
     let parsed;
     try {
-      parsed = parseStressTestPayload(content);
+      parsed = parseHiveMindPayload(content);
     } catch (e) {
       return res.status(502).json({
-        error: "Could not parse model JSON. Try again or simplify your idea.",
+        error: "Could not parse model JSON. Try again or shorten the text.",
         details: String(e?.message || e),
       });
     }

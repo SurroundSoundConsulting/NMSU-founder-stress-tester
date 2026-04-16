@@ -1,7 +1,7 @@
 {
-  "name": "founder-stress-tester",
+  "name": "hive-mind",
   "version": "1.0.0",
-  "description": "Local web app that stress-tests startup ideas with AI",
+  "description": "Local web app that analyzes meeting transcripts with AI (Hive Mind)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

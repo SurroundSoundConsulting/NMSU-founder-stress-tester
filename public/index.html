@@ -3,175 +3,548 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Founder Stress Tester</title>
+  <title>Hive Mind</title>
+  <meta name="theme-color" content="#FFD54F" />
   <style>
     :root {
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      line-height: 1.5;
-      color: #1a1a1a;
-      background: #f5f5f7;
+      --hive-black: #14110d;
+      --hive-ink: #1e1a14;
+      --hive-yellow: #ffd54f;
+      --hive-gold: #ffc107;
+      --hive-honey: #ffe082;
+      --hive-cream: #fffbf0;
+      --hive-ivory: #fffef8;
+      --hive-comb: rgba(20, 17, 13, 0.07);
+      --hive-comb-line: rgba(20, 17, 13, 0.11);
+      font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+      line-height: 1.55;
+      color: var(--hive-ink);
     }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+    }
+
     body {
-      max-width: 40rem;
+      margin: 0;
+      min-height: 100vh;
+      background: linear-gradient(165deg, #fff9e6 0%, #ffe9a8 45%, #ffd54f 100%);
+      color: var(--hive-ink);
+    }
+
+    /* Honeycomb field */
+    .hive-bg {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      background-color: transparent;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cpath fill='none' stroke='%2314110d' stroke-opacity='0.09' d='M14 0l12.1 7v14L14 28 1.9 21V7L14 0z'/%3E%3Cpath fill='none' stroke='%2314110d' stroke-opacity='0.09' d='M14 21l12.1 7v14L14 49 1.9 42V28L14 21z'/%3E%3C/svg%3E");
+      background-size: 56px 98px;
+    }
+
+    .hive-bg::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cpath fill='none' stroke='%2314110d' stroke-opacity='0.06' d='M14 0l12.1 7v14L14 28 1.9 21V7L14 0z'/%3E%3Cpath fill='none' stroke='%2314110d' stroke-opacity='0.06' d='M14 21l12.1 7v14L14 49 1.9 42V28L14 21z'/%3E%3C/svg%3E");
+      background-size: 56px 98px;
+      background-position: 28px 49px;
+      opacity: 0.85;
+    }
+
+    .hive-app {
+      position: relative;
+      z-index: 1;
+      max-width: 48rem;
       margin: 0 auto;
-      padding: 1.5rem;
+      padding: 1.75rem 1.25rem 2.5rem;
     }
-    h1 {
-      font-size: 1.5rem;
-      margin-top: 0;
+
+    .hive-panel {
+      background: var(--hive-ivory);
+      border: 3px solid var(--hive-black);
+      border-radius: 20px;
+      padding: 1.35rem 1.35rem 1.6rem;
+      box-shadow:
+        8px 8px 0 rgba(20, 17, 13, 0.12),
+        inset 0 1px 0 rgba(255, 255, 255, 0.85);
     }
+
+    .hive-header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 0.75rem 1.25rem;
+      margin-bottom: 1rem;
+      text-align: center;
+    }
+
+    .hive-header__title {
+      flex: 1 1 12rem;
+      min-width: min(100%, 12rem);
+    }
+
+    .hive-header h1 {
+      font-size: clamp(1.65rem, 4vw, 2.05rem);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      margin: 0;
+      color: var(--hive-black);
+      text-shadow: 2px 2px 0 var(--hive-honey);
+    }
+
+    .hive-header .tagline {
+      margin: 0.4rem 0 0;
+      font-size: 0.98rem;
+      color: #3d3428;
+      font-weight: 500;
+    }
+
+    .bee {
+      flex: 0 0 auto;
+      filter: drop-shadow(2px 3px 0 rgba(20, 17, 13, 0.15));
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      .bee--bob {
+        animation: hive-bob 3.2s ease-in-out infinite;
+      }
+      .bee--bob-delay {
+        animation: hive-bob 3.2s ease-in-out infinite;
+        animation-delay: 0.6s;
+      }
+      .bee--wiggle {
+        animation: hive-wiggle 4s ease-in-out infinite;
+      }
+    }
+
+    @keyframes hive-bob {
+      0%,
+      100% {
+        transform: translateY(0) rotate(-4deg);
+      }
+      50% {
+        transform: translateY(-6px) rotate(4deg);
+      }
+    }
+
+    @keyframes hive-wiggle {
+      0%,
+      100% {
+        transform: rotate(-6deg);
+      }
+      50% {
+        transform: rotate(6deg);
+      }
+    }
+
+    .input-block {
+      margin-top: 0.5rem;
+    }
+
     label {
-      font-weight: 600;
+      font-weight: 700;
+      color: var(--hive-black);
+      display: inline-block;
     }
+
     textarea {
       width: 100%;
       max-width: 100%;
-      box-sizing: border-box;
-      margin-top: 0.35rem;
-      padding: 0.6rem 0.75rem;
-      border: 1px solid #ccc;
-      border-radius: 8px;
+      margin-top: 0.4rem;
+      padding: 0.75rem 0.85rem;
+      border: 2px solid var(--hive-black);
+      border-radius: 14px;
       font: inherit;
       resize: vertical;
-      min-height: 8rem;
+      min-height: 10rem;
+      background: linear-gradient(180deg, #fff 0%, var(--hive-cream) 100%);
+      box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.9);
     }
-    select {
-      display: block;
-      margin-top: 0.35rem;
-      padding: 0.45rem 0.6rem;
-      font: inherit;
-      border: 1px solid #ccc;
-      border-radius: 8px;
-      max-width: 100%;
-      background: #fff;
+
+    textarea:focus {
+      outline: 3px solid var(--hive-gold);
+      outline-offset: 2px;
     }
-    .mode-row {
-      margin-top: 1rem;
+
+    .btn-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      align-items: center;
+      margin-top: 0.85rem;
     }
-    .mode-row .hint {
-      margin-top: 0.35rem;
-      margin-bottom: 0;
-    }
+
     button {
-      margin-top: 0.75rem;
-      padding: 0.5rem 1rem;
+      padding: 0.55rem 1.15rem;
       font: inherit;
+      font-weight: 700;
       cursor: pointer;
-      border-radius: 8px;
-      border: 1px solid #333;
-      background: #222;
-      color: #fff;
+      border-radius: 999px;
+      border: 3px solid var(--hive-black);
+      background: var(--hive-black);
+      color: var(--hive-yellow);
+      box-shadow: 4px 4px 0 rgba(20, 17, 13, 0.2);
+      transition: transform 0.08s ease, box-shadow 0.08s ease;
     }
+
+    button:hover:not(:disabled) {
+      transform: translate(-1px, -1px);
+      box-shadow: 5px 5px 0 rgba(20, 17, 13, 0.22);
+    }
+
+    button:active:not(:disabled) {
+      transform: translate(1px, 1px);
+      box-shadow: 2px 2px 0 rgba(20, 17, 13, 0.2);
+    }
+
     button:disabled {
       opacity: 0.55;
       cursor: not-allowed;
+      box-shadow: none;
     }
+
+    .btn-secondary {
+      background: var(--hive-yellow);
+      color: var(--hive-black);
+    }
+
     .hint {
-      font-size: 0.9rem;
-      color: #555;
-      margin-bottom: 1rem;
+      font-size: 0.92rem;
+      color: #4a4034;
+      margin-bottom: 0.85rem;
     }
+
     .status {
       margin-top: 1rem;
       font-size: 0.95rem;
-      color: #444;
+      color: #3d3428;
+      font-weight: 600;
     }
+
     .error {
-      color: #b00020;
-      background: #ffe8ec;
+      color: #6b1010;
+      background: #fff5f5;
+      border: 2px solid #e8a598;
       padding: 0.75rem 1rem;
-      border-radius: 8px;
+      border-radius: 14px;
       margin-top: 1rem;
+      font-weight: 600;
     }
+
     #results {
-      margin-top: 1.5rem;
+      margin-top: 1.35rem;
     }
+
     #results section {
-      background: #fff;
-      border: 1px solid #e0e0e0;
-      border-radius: 10px;
-      padding: 1rem 1.1rem;
+      position: relative;
+      background: var(--hive-cream);
+      border: 2px solid var(--hive-black);
+      border-radius: 16px;
+      padding: 1rem 1.1rem 1.15rem;
       margin-bottom: 1rem;
+      overflow: hidden;
     }
+
+    #results section::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 120px;
+      height: 100%;
+      opacity: 0.12;
+      background: repeating-linear-gradient(
+        90deg,
+        transparent 0,
+        transparent 10px,
+        var(--hive-black) 10px,
+        var(--hive-black) 12px
+      );
+      mask-image: linear-gradient(90deg, transparent, #000 40%);
+      pointer-events: none;
+    }
+
     #results h2 {
-      font-size: 1.05rem;
-      margin: 0 0 0.5rem 0;
+      position: relative;
+      font-size: 1.08rem;
+      margin: 0 0 0.55rem 0;
+      font-weight: 800;
+      color: var(--hive-black);
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
     }
+
+    #results h2::before {
+      content: "";
+      width: 10px;
+      height: 10px;
+      background: var(--hive-gold);
+      border: 2px solid var(--hive-black);
+      transform: rotate(30deg);
+      flex-shrink: 0;
+    }
+
     #results ul {
       margin: 0;
-      padding-left: 1.2rem;
+      padding-left: 1.25rem;
     }
+
     #results li {
-      margin-bottom: 0.35rem;
+      margin-bottom: 0.4rem;
     }
+
+    #results li::marker {
+      color: var(--hive-gold);
+      font-weight: 700;
+    }
+
     #results p {
       margin: 0;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      margin-top: 0.35rem;
+      border-radius: 12px;
+    }
+
+    table.action-items {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+      background: #fff;
+      border: 2px solid var(--hive-black);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    table.action-items th,
+    table.action-items td {
+      border: 1px solid rgba(20, 17, 13, 0.18);
+      padding: 0.5rem 0.6rem;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    table.action-items th {
+      background: linear-gradient(180deg, var(--hive-yellow) 0%, var(--hive-gold) 100%);
+      font-weight: 800;
+      white-space: nowrap;
+      color: var(--hive-black);
+    }
+
+    table.action-items tbody tr:nth-child(even) {
+      background: rgba(255, 224, 130, 0.22);
+    }
+
+    table.action-items td.num {
+      text-align: center;
+      width: 3.5rem;
+      font-weight: 800;
+      color: var(--hive-black);
+    }
+
+    .empty-row td {
+      color: #5c5348;
+      font-style: italic;
+    }
+
+    .export-section {
+      margin-top: 0.25rem;
+    }
+
+    .export-section h2 {
+      margin-bottom: 0.5rem;
+    }
+
+    .export-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+      margin-bottom: 0.5rem;
+    }
+
+    .export-actions button {
+      margin-top: 0;
+    }
+
+    #markdownOutput {
+      min-height: 14rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.85rem;
+      line-height: 1.45;
+      background: #fffef6;
+      border-style: dashed;
+    }
+
+    .copy-hint {
+      font-size: 0.9rem;
+      color: #4a4034;
+      margin-top: 0.35rem;
+      min-height: 1.25rem;
+      font-weight: 600;
+    }
+
+    .copy-hint.success {
+      color: #1b5e20;
+    }
+
+    .hive-footer {
+      margin-top: 1.5rem;
+      text-align: center;
+      font-size: 0.88rem;
+      color: rgba(20, 17, 13, 0.55);
+      font-weight: 600;
     }
   </style>
 </head>
 <body>
-  <h1>Founder Stress Tester</h1>
-  <p class="hint">
-    Type a startup idea. The app sends it to the server, which calls an AI model and returns
-    assumptions, risks, and a quick validation test.
-  </p>
+  <div class="hive-bg" aria-hidden="true"></div>
 
-  <label for="idea">Startup idea</label>
-  <textarea
-    id="idea"
-    placeholder="Example: A subscription box for rare houseplants aimed at busy professionals in Austin..."
-  ></textarea>
+  <main class="hive-app">
+    <div class="hive-panel">
+      <header class="hive-header">
+        <svg
+          class="bee bee--bob"
+          width="56"
+          height="56"
+          viewBox="0 0 64 64"
+          aria-hidden="true"
+        >
+          <ellipse cx="20" cy="30" rx="14" ry="9" fill="#f0f7ff" opacity="0.95" transform="rotate(-22 20 30)" />
+          <ellipse cx="44" cy="30" rx="14" ry="9" fill="#f0f7ff" opacity="0.95" transform="rotate(22 44 30)" />
+          <ellipse cx="32" cy="38" rx="20" ry="15" fill="#ffd54f" stroke="#14110d" stroke-width="2.2" />
+          <rect x="22" y="32" width="20" height="5" rx="1.5" fill="#14110d" />
+          <rect x="24" y="40" width="16" height="5" rx="1.5" fill="#14110d" />
+          <circle cx="32" cy="18" r="11" fill="#ffe082" stroke="#14110d" stroke-width="2.2" />
+          <circle cx="27" cy="16" r="2.2" fill="#14110d" />
+          <circle cx="37" cy="16" r="2.2" fill="#14110d" />
+          <path d="M26 21 Q32 25 38 21" stroke="#14110d" stroke-width="1.6" fill="none" stroke-linecap="round" />
+          <path d="M22 8 L20 3 M42 8 L44 3" stroke="#14110d" stroke-width="2" stroke-linecap="round" />
+          <circle cx="20" cy="2.5" r="2.5" fill="#14110d" />
+          <circle cx="44" cy="2.5" r="2.5" fill="#14110d" />
+        </svg>
+        <div class="hive-header__title">
+          <h1>Hive Mind</h1>
+          <p class="tagline">Your meetings, distilled — sweet &amp; organized.</p>
+        </div>
+        <svg
+          class="bee bee--bob-delay bee--wiggle"
+          width="52"
+          height="52"
+          viewBox="0 0 64 64"
+          aria-hidden="true"
+        >
+          <ellipse cx="20" cy="30" rx="14" ry="9" fill="#f0f7ff" opacity="0.95" transform="rotate(-22 20 30)" />
+          <ellipse cx="44" cy="30" rx="14" ry="9" fill="#f0f7ff" opacity="0.95" transform="rotate(22 44 30)" />
+          <ellipse cx="32" cy="38" rx="20" ry="15" fill="#ffd54f" stroke="#14110d" stroke-width="2.2" />
+          <rect x="22" y="32" width="20" height="5" rx="1.5" fill="#14110d" />
+          <rect x="24" y="40" width="16" height="5" rx="1.5" fill="#14110d" />
+          <circle cx="32" cy="18" r="11" fill="#ffe082" stroke="#14110d" stroke-width="2.2" />
+          <circle cx="27" cy="16" r="2.2" fill="#14110d" />
+          <circle cx="37" cy="16" r="2.2" fill="#14110d" />
+          <ellipse cx="32" cy="22" rx="4" ry="2.5" fill="#ff8a65" opacity="0.35" />
+          <path d="M22 8 L20 3 M42 8 L44 3" stroke="#14110d" stroke-width="2" stroke-linecap="round" />
+          <circle cx="20" cy="2.5" r="2.5" fill="#14110d" />
+          <circle cx="44" cy="2.5" r="2.5" fill="#14110d" />
+        </svg>
+      </header>
 
-  <div class="mode-row">
-    <label for="mode">Stress test mode</label>
-    <select id="mode" aria-describedby="mode-hint">
-      <option value="brutal">Brutal</option>
-      <option value="balanced" selected>Balanced</option>
-      <option value="supportive">Supportive</option>
-    </select>
-    <p class="hint" id="mode-hint">
-      Brutal = toughest read. Balanced = fair. Supportive = gentler framing.
-    </p>
-  </div>
+      <p class="hint">
+        Paste a meeting transcript or notes. Busy bees on the server turn it into action items,
+        insights, debate points, and a topic summary.
+      </p>
 
-  <button type="button" id="submit">Run stress test</button>
+      <div class="input-block">
+        <label for="transcript">Meeting transcript or notes</label>
+        <textarea
+          id="transcript"
+          placeholder="Paste transcript or bullet notes from your meeting…"
+        ></textarea>
+      </div>
 
-  <p class="status" id="status" hidden aria-live="polite"></p>
-  <div class="error" id="error" hidden role="alert"></div>
+      <div class="btn-row">
+        <button type="button" id="submit">Analyze meeting</button>
+      </div>
 
-  <div id="results" hidden>
-    <section aria-labelledby="h-assumptions">
-      <h2 id="h-assumptions">Core assumptions</h2>
-      <ul id="coreAssumptions"></ul>
+      <p class="status" id="status" hidden aria-live="polite"></p>
+      <div class="error" id="error" hidden role="alert"></div>
+
+      <div id="results" hidden>
+    <section aria-labelledby="h-actions">
+      <h2 id="h-actions">Action items</h2>
+      <div class="table-wrap">
+        <table class="action-items" id="actionItemsTable" aria-describedby="h-actions">
+          <thead>
+            <tr>
+              <th scope="col" title="0 = lowest, 9 = highest">Urgency</th>
+              <th scope="col">Task</th>
+              <th scope="col">Owner</th>
+              <th scope="col">Due / Next Step</th>
+            </tr>
+          </thead>
+          <tbody id="actionItemsBody"></tbody>
+        </table>
+      </div>
     </section>
-    <section aria-labelledby="h-risks">
-      <h2 id="h-risks">Major risks</h2>
-      <ul id="majorRisks"></ul>
+    <section aria-labelledby="h-insights">
+      <h2 id="h-insights">Insights</h2>
+      <ul id="insights"></ul>
     </section>
-    <section aria-labelledby="h-validation">
-      <h2 id="h-validation">Fastest validation test</h2>
-      <p id="fastestValidationTest"></p>
+    <section aria-labelledby="h-debate">
+      <h2 id="h-debate">Points of debate</h2>
+      <ul id="pointsOfDebate"></ul>
     </section>
-  </div>
+    <section aria-labelledby="h-topics">
+      <h2 id="h-topics">Key topics summary</h2>
+      <p id="keyTopicsSummary"></p>
+    </section>
+    <section class="export-section" aria-labelledby="h-export">
+      <h2 id="h-export">Export as Markdown</h2>
+      <div class="export-actions">
+        <button type="button" id="generateMd">Generate Markdown</button>
+        <button type="button" class="btn-secondary" id="copyMd">Copy Markdown</button>
+      </div>
+      <label for="markdownOutput" class="hint">Markdown output</label>
+      <textarea id="markdownOutput" readonly rows="14" spellcheck="false" placeholder='Click "Generate Markdown" to build export from the results above.'></textarea>
+      <p class="copy-hint" id="copyHint" hidden aria-live="polite"></p>
+    </section>
+      </div>
+
+      <p class="hive-footer" aria-hidden="true">🐝 Built for productive hives everywhere</p>
+    </div>
+  </main>
 
   <script>
-    const ideaEl = document.getElementById("idea");
-    const modeEl = document.getElementById("mode");
+    const transcriptEl = document.getElementById("transcript");
     const submitBtn = document.getElementById("submit");
     const statusEl = document.getElementById("status");
     const errorEl = document.getElementById("error");
     const resultsEl = document.getElementById("results");
-    const listAssumptions = document.getElementById("coreAssumptions");
-    const listRisks = document.getElementById("majorRisks");
-    const textValidation = document.getElementById("fastestValidationTest");
+    const actionItemsBody = document.getElementById("actionItemsBody");
+    const listInsights = document.getElementById("insights");
+    const listDebate = document.getElementById("pointsOfDebate");
+    const textTopics = document.getElementById("keyTopicsSummary");
+    const generateMdBtn = document.getElementById("generateMd");
+    const copyMdBtn = document.getElementById("copyMd");
+    const markdownOutput = document.getElementById("markdownOutput");
+    const copyHint = document.getElementById("copyHint");
+
+    let lastResult = null;
 
     function setLoading(isLoading) {
       submitBtn.disabled = isLoading;
-      ideaEl.disabled = isLoading;
-      modeEl.disabled = isLoading;
+      transcriptEl.disabled = isLoading;
       if (isLoading) {
         statusEl.hidden = false;
-        statusEl.textContent = "Thinking… this may take a few seconds.";
+        statusEl.textContent = "The hive is working… this may take a few seconds.";
       } else {
         statusEl.hidden = true;
         statusEl.textContent = "";
@@ -197,25 +570,176 @@
       });
     }
 
-    submitBtn.addEventListener("click", async function () {
-      const idea = ideaEl.value.trim();
+    function mdTableCell(s) {
+      return String(s == null ? "" : s)
+        .replace(/\|/g, "\\|")
+        .replace(/\n/g, " ")
+        .trim();
+    }
+
+    function buildMarkdown(data) {
+      const lines = [];
+      lines.push("## Action Items");
+      lines.push("");
+      lines.push("| Urgency | Task | Owner | Due / Next Step |");
+      lines.push("| --- | --- | --- | --- |");
+      const items = data.actionItems || [];
+      if (items.length === 0) {
+        lines.push("| — | No action items extracted. | — | — |");
+      } else {
+        items.forEach(function (row) {
+          const due =
+            row.dueOrNextStep != null && String(row.dueOrNextStep).trim() !== ""
+              ? row.dueOrNextStep
+              : row.dateDue || "";
+          lines.push(
+            "| " +
+              mdTableCell(row.urgency) +
+              " | " +
+              mdTableCell(row.task) +
+              " | " +
+              mdTableCell(row.owner) +
+              " | " +
+              mdTableCell(due) +
+              " |",
+          );
+        });
+      }
+      lines.push("");
+      lines.push("## Insights");
+      lines.push("");
+      const insights = data.insights || [];
+      if (insights.length === 0) {
+        lines.push("*(none)*");
+      } else {
+        insights.forEach(function (t) {
+          lines.push("- " + String(t).replace(/\n/g, " "));
+        });
+      }
+      lines.push("");
+      lines.push("## Points of Debate");
+      lines.push("");
+      const debate = data.pointsOfDebate || [];
+      if (debate.length === 0) {
+        lines.push("*(none)*");
+      } else {
+        debate.forEach(function (t) {
+          lines.push("- " + String(t).replace(/\n/g, " "));
+        });
+      }
+      lines.push("");
+      lines.push("## Key Topics Summary");
+      lines.push("");
+      const summary = (data.keyTopicsSummary && String(data.keyTopicsSummary).trim()) || "";
+      lines.push(summary || "*(none)*");
+      return lines.join("\n");
+    }
+
+    function hideCopyHint() {
+      copyHint.hidden = true;
+      copyHint.textContent = "";
+      copyHint.classList.remove("success");
+    }
+
+    function showCopyHint(msg, success) {
+      copyHint.hidden = false;
+      copyHint.textContent = msg;
+      copyHint.classList.toggle("success", Boolean(success));
+      window.clearTimeout(showCopyHint._t);
+      showCopyHint._t = window.setTimeout(function () {
+        copyHint.hidden = true;
+        copyHint.textContent = "";
+        copyHint.classList.remove("success");
+      }, 2500);
+    }
+
+    generateMdBtn.addEventListener("click", function () {
+      hideCopyHint();
+      if (!lastResult) {
+        markdownOutput.value = "";
+        showError("Run an analysis first so there are results to export.");
+        return;
+      }
       clearError();
+      markdownOutput.value = buildMarkdown(lastResult);
+    });
+
+    copyMdBtn.addEventListener("click", async function () {
+      const text = markdownOutput.value;
+      hideCopyHint();
+      if (!text.trim()) {
+        showCopyHint("Nothing to copy — generate markdown first.", false);
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(text);
+        showCopyHint("Copied to clipboard.", true);
+      } catch (e) {
+        markdownOutput.focus();
+        markdownOutput.select();
+        try {
+          document.execCommand("copy");
+          showCopyHint("Copied to clipboard.", true);
+        } catch (err) {
+          showCopyHint("Copy failed — select the text and copy manually.", false);
+        }
+      }
+    });
+
+    function fillActionTable(rows) {
+      actionItemsBody.innerHTML = "";
+      const list = rows || [];
+      if (list.length === 0) {
+        const tr = document.createElement("tr");
+        tr.className = "empty-row";
+        const td = document.createElement("td");
+        td.colSpan = 4;
+        td.textContent = "No action items extracted.";
+        tr.appendChild(td);
+        actionItemsBody.appendChild(tr);
+        return;
+      }
+      list.forEach(function (row) {
+        const tr = document.createElement("tr");
+        const tdU = document.createElement("td");
+        tdU.className = "num";
+        tdU.textContent = String(row.urgency);
+        const tdT = document.createElement("td");
+        tdT.textContent = row.task;
+        const tdO = document.createElement("td");
+        tdO.textContent = row.owner;
+        const tdD = document.createElement("td");
+        tdD.textContent = row.dueOrNextStep != null && row.dueOrNextStep !== ""
+          ? row.dueOrNextStep
+          : row.dateDue || "";
+        tr.appendChild(tdU);
+        tr.appendChild(tdT);
+        tr.appendChild(tdO);
+        tr.appendChild(tdD);
+        actionItemsBody.appendChild(tr);
+      });
+    }
+
+    submitBtn.addEventListener("click", async function () {
+      const transcript = transcriptEl.value.trim();
+      clearError();
+      hideCopyHint();
+      lastResult = null;
+      markdownOutput.value = "";
       resultsEl.hidden = true;
 
-      if (!idea) {
-        showError("Please enter an idea first.");
+      if (!transcript) {
+        showError("Please paste a transcript or notes first.");
         return;
       }
 
       setLoading(true);
       try {
-        // Same origin: page is served by Express, so /stress-test avoids CORS issues.
-        const res = await fetch("/stress-test", {
+        const res = await fetch("/hive-mind", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            idea: idea,
-            mode: modeEl.value,
+            transcript: transcript,
           }),
         });
 
@@ -228,9 +752,12 @@
           return;
         }
 
-        fillList(listAssumptions, data.coreAssumptions);
-        fillList(listRisks, data.majorRisks);
-        textValidation.textContent = data.fastestValidationTest || "(none)";
+        lastResult = data;
+        fillActionTable(data.actionItems);
+        fillList(listInsights, data.insights);
+        fillList(listDebate, data.pointsOfDebate);
+        textTopics.textContent = data.keyTopicsSummary || "(none)";
+        markdownOutput.value = "";
         resultsEl.hidden = false;
       } catch (e) {
         showError("Network error: is the server running? (" + String(e.message || e) + ")");
