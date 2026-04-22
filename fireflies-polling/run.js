@@ -23,6 +23,7 @@ const {
   updateMasterRow,
 } = require("../lib/commandCenterSheets");
 const { matchOrAllocateTask, buildMasterRow, padRow } = require("../lib/taskMerge");
+const { applyLlmDedupeMerge } = require("../lib/taskDedupeLlm");
 
 async function logStep(transcriptId, step, message) {
   const ts = new Date().toISOString();
@@ -43,27 +44,41 @@ async function mergeActionItemsToMaster(hiveResult, meeting) {
   const items = hiveResult.actionItems || [];
   if (items.length === 0) return { inserted: 0, updated: 0 };
 
-  let masterSnapshot = await getMasterDataRows();
+  const masterSnapshot = await getMasterDataRows();
+  const stamped = masterSnapshot.map(function (row, i) {
+    return { sheetRow: i + 2, row };
+  });
+  const apiKey = String(process.env.OPENAI_API_KEY || "").trim();
+
+  if (apiKey) {
+    try {
+      return await applyLlmDedupeMerge(items, meeting, masterSnapshot, stamped, apiKey);
+    } catch (e) {
+      console.warn("LLM dedupe failed, using rule-based merge:", e.message || e);
+    }
+  }
+
+  let snapshot = masterSnapshot;
   const baseRow = 2;
   let inserted = 0;
   let updated = 0;
   const nowIso = new Date().toISOString();
 
   for (const task of items) {
-    const m = matchOrAllocateTask(task, masterSnapshot, baseRow);
+    const m = matchOrAllocateTask(task, snapshot, baseRow);
     if (m.type === "update") {
       const idx = m.sheetRow - baseRow;
-      const existing = masterSnapshot[idx] || [];
+      const existing = snapshot[idx] || [];
       const row = padRow(
         buildMasterRow(task, meeting, m.taskId, existing[14] || nowIso, nowIso),
       );
       await updateMasterRow(m.sheetRow, row);
-      masterSnapshot[idx] = row;
+      snapshot[idx] = row;
       updated += 1;
     } else {
       const row = padRow(buildMasterRow(task, meeting, m.taskId, null, nowIso));
       await appendMasterRows([row]);
-      masterSnapshot.push(row);
+      snapshot.push(row);
       inserted += 1;
     }
   }

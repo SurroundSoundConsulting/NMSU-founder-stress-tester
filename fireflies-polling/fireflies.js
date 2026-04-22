@@ -60,7 +60,8 @@ function mapListItem(t) {
 
 /**
  * List transcripts in a time window. Paginates in steps of 50.
- * Falls back to a simple list + client-side time filter if date filters are rejected.
+ * Fireflies expects `DateTime` for fromDate/toDate (ISO-8601 strings in JSON), not String.
+ * Falls back to list + client-side filter only if the primary query still fails.
  * @param {{ fromIso: string, toIso: string }} param
  * @returns {Promise<Array<{ id: string, title: string, date: number, transcript_url: string }>>}
  */
@@ -68,7 +69,7 @@ async function listTranscriptsInWindow({ fromIso, toIso }) {
   const fromMs = new Date(fromIso).getTime();
   const toMs = new Date(toIso).getTime();
 
-  const query = `query ListTranscripts($fromDate: String, $toDate: String, $limit: Int, $skip: Int) {
+  const query = `query ListTranscripts($fromDate: DateTime, $toDate: DateTime, $limit: Int, $skip: Int) {
     transcripts(fromDate: $fromDate, toDate: $toDate, limit: $limit, skip: $skip) {
       id
       title
