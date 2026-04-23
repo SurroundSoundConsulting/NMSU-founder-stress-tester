@@ -108,8 +108,14 @@ function fetchOKRContext() {
 
     var rows  = sheet.getRange(2, 1, sheet.getLastRow() - 1, 7).getValues();
     var lines = rows
-      .filter(function(r) { return String(r[6]).toUpperCase() !== 'FALSE'; }) // G: active
-      .map(function(r)    { return r[4] + ': ' + r[5]; });                   // E: kr_label + F: kr_text
+      .filter(function(r) { return String(r[6]).toUpperCase() !== 'FALSE'; })
+      .map(function(r) {
+        var section   = String(r[0] || '');
+        var objective = String(r[2] || '');
+        var krLabel   = String(r[4] || '');
+        var krText    = String(r[5] || '');
+        return 'Section: ' + section + ' | Objective: ' + objective + ' | KR Label: ' + krLabel + ' | KR Text: ' + krText;
+      });
 
     if (!lines.length) return '';
 
@@ -488,12 +494,9 @@ function syncMeetArtifacts() {
 function parseWithHiveMind(transcriptText, meetingDate, okrContext) {
   var today = meetingDate || Utilities.formatDate(new Date(), 'UTC', 'yyyy-MM-dd');
 
-  // Prompt structure: JSON template FIRST so the model knows the output shape,
-  // with okr_link instruction embedded in the field itself.
-  // OKR list goes LAST so it is fresh in the model's attention when it fills in okr_link.
   var systemPrompt = [
     'You are Hive Mind, an AI operations assistant.',
-    'Task: extract every action item from the meeting transcript, and map each one to an OKR Key Result.',
+    'Task: extract every action item from the meeting transcript, then assign each action item to the single best-fit OKR Key Result based on business outcome, including indirect and enabling work.',
     'Reference date for relative deadlines: ' + today + '.',
     '',
     'Return ONLY valid JSON (no markdown fences):',
@@ -508,7 +511,8 @@ function parseWithHiveMind(transcriptText, meetingDate, okrContext) {
     '      "next_step": "immediate next action or context",',
     '      "blockers": "what is blocking this, or None noted",',
     '      "dependencies": "comma-separated related tasks, or None noted",',
-    '      "okr_link": "COPY the kr_label from the OKR list below that this task most advances — e.g. US Kompato > O1 > KR1. Pricing/cost tasks → revenue or go-live KRs. Hiring → team-scaling KRs. Write Unmapped ONLY if no KR has any connection.",',
+    '      "okr_link": "Choose the SINGLE best-fit KR Label from the OKR list based on downstream business outcome. Do NOT require exact wording overlap. A task can support a KR indirectly through enablement, preparation, tooling, or risk reduction and still be a valid match. Pricing, packaging, cost, margin, and unit-economics tasks usually map to profitability, ARR, revenue, gross margin, or deal-conversion KRs. DDQ, RFP, compliance review, and answer-library work usually map to deal-progression or compliance KRs. Onboarding, implementation, integration, UAT, file mapping, handoff quality, and launch-readiness work usually map to signed-to-live, go-live, onboarding-speed, or active-production KRs. Proof assets, case studies, ROI narratives, pricing calculators, battlecards, and playbooks usually map to proof-asset, enablement, category-leadership, or conversion KRs. Client reviews, wallet-share analysis, vendor-ranking discussions, and expansion recommendations usually map to wallet-share, top-2 vendor, value-review, or expansion KRs. AI workflow automation, team AIs, delivery-speed improvements, and workflow documentation usually map to AI-fusion, delivery-speed, or autonomous-workflow KRs. Only write Unmapped if no KR is plausibly advanced even indirectly after checking profitability, market acquisition, go-live, client performance, compliance, AI-fusion, product capability, and team capacity.",',
+    '      "okr_rationale": "one short sentence explaining why this task advances that KR (or why it is Unmapped)",',
     '      "risk_flag": "high | medium | low or empty"',
     '    }',
     '  ],',
@@ -518,6 +522,43 @@ function parseWithHiveMind(transcriptText, meetingDate, okrContext) {
     '',
     'Urgency: 9=crisis, 7-8=critical, 5-6=high priority, 3-4=moderate, 1-2=low, 0=trivial.',
     'Extract every action item explicitly or clearly implied. Omit discussion with no follow-up.',
+    '',
+    'KR MAPPING RULES:',
+    '1. You must assign the single best-fit KR Label for every action item unless there is truly no plausible business connection.',
+    '2. Match by intended outcome, not keyword overlap.',
+    '3. A task may support a KR indirectly through enablement. Indirect support still counts as a valid match.',
+    '4. Prefer the KR that would most likely benefit if this task is completed successfully.',
+    '5. Use Unmapped only as a last resort after considering direct impact, indirect impact, execution enablement, and team capacity enablement.',
+    '6. If multiple KRs could fit, choose the most downstream business outcome, not the most local activity.',
+    '7. Do not leave okr_link blank.',
+    '',
+    'KR MAPPING DECISION SEQUENCE:',
+    '1. What business outcome would improve if this task gets done well?',
+    '2. Is the task about winning a client, getting a client live, improving client results, proving value, reducing compliance risk, automating workflows, or increasing team capacity?',
+    '3. Which KR would most likely move first or most strongly because of that work?',
+    '4. Choose that KR even if the task is only an enabling step toward the result.',
+    '5. Use Unmapped only if the task is truly administrative with no plausible effect on any KR.',
+    '',
+    'TASK TYPE → KR FAMILY mapping:',
+    '- Commercial economics (pricing, margin, vendor cost, unit economics, budget, proposal): profitability / ARR / revenue / gross-margin / deal-conversion KRs.',
+    '- Deal acceleration (DDQ, RFP, compliance package, proof asset, battlecard, playbook, lender offer): deal-progression / GTM enablement / category-leadership / compliance KRs.',
+    '- Go-live execution (integration, data mapping, implementation milestone, onboarding artifact, UAT, launch readiness): signed-to-live / onboarding-cycle / active-production / first-time-go-live KRs.',
+    '- Post-live value (ROI review, MBR, wallet-share conversation, vendor ranking, expansion case): wallet-share / top-2-vendor / value-review / expansion KRs.',
+    '- Internal scale (workflow inventory, AI-assisted deliverables, Team AIs, process automation, documentation): AI-fusion / delivery-speed / autonomous-workflow / CS-GTM-Integrations-scale KRs.',
+    '- Risk control (compliance monitoring, audit, incident reduction, policy docs, regulatory readiness): compliance-AI / audit-AI / client-compliance-proof / response-SLA / auditability KRs.',
+    '',
+    'TIE-BREAK RULES:',
+    '- Process KR vs revenue KR: choose revenue when the process work is clearly in service of revenue generation.',
+    '- Go-live KR vs client-performance KR: choose go-live when the account is not yet live; choose client-performance when the account is live and the work is about results, retention, or expansion.',
+    '- Compliance KR vs sales-velocity KR: choose compliance when task primarily reduces regulatory risk; choose sales-velocity when task primarily unblocks contracting.',
+    '- Internal AI-fusion KR vs functional-team KR: prefer the functional-team KR when the workflow improvement is clearly meant to move that team outcome.',
+    '',
+    'KOMPATO-SPECIFIC RULES:',
+    '- Pricing, packaging, proposal economics, margin analysis, collections cost, vendor cost, staffing efficiency, or unit-economics work maps first to profitability / revenue / gross-margin KRs.',
+    '- If pricing work is in service of a live opportunity, sales proposal, lender offer, or debt-buyer close plan, prefer the acquisition or ARR KR.',
+    '- If pricing work is in service of implementation scope, launch feasibility, or go-live approval, prefer the go-live / onboarding KR.',
+    '- Collections strategy, liquidation improvement, RPC/PTP, routing logic, operational QA, or channel optimization maps to Operations or Product performance KRs tied to vendor ranking, collections amount, cure rate, or liquidation lift.',
+    '- Integration specs, AIM mappings, SFTP/file handling, UAT readiness, implementation artifacts, and engineering handoff quality map to Client Integrations or Engineering onboarding KRs.',
     '',
     okrContext || 'No OKR list available — use "Unmapped" for all okr_link values.'
   ].join('\n');
@@ -559,12 +600,13 @@ function parseWithHiveMind(transcriptText, meetingDate, okrContext) {
 
   var parsed = JSON.parse(content);
 
-  // Log okr_link values for every action item — this is the final diagnostic
+  // Log okr_link + okr_rationale for every item — primary diagnostic for mapping quality
   if (parsed && parsed.actionItems) {
-    var okrSummary = parsed.actionItems.map(function(item, i) {
-      return 'item' + i + '=[' + (item.okr_link || 'MISSING') + ']';
-    }).join(' | ');
-    logSyncActivity('openai_okr_links', '', '', okrSummary);
+    parsed.actionItems.forEach(function(item, i) {
+      logSyncActivity('openai_okr_links', '', '',
+        'item' + i + ' okr=[' + (item.okr_link || 'MISSING') + '] rationale=[' + (item.okr_rationale || '') + '] task=[' + String(item.task || '').slice(0, 60) + ']'
+      );
+    });
   }
 
   return parsed;
