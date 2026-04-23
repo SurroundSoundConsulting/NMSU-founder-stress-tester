@@ -31,10 +31,10 @@ var CONFIG = {
   // Add your own patterns if Gemini/Meet uses different naming in your Workspace
   MEET_TITLE_PATTERNS: ['Notes by Gemini', 'Meeting transcript', 'Meet transcript'],
 
-  // Google Doc ID containing your OKRs — paste the ID from the URL
-  // docs.google.com/document/d/DOC_ID/edit
-  // Leave empty to skip OKR mapping (tasks will show "Unmapped")
-  OKR_DOC_ID: '1znQIBtCw5pgLEWQKPrGJphdz5FQtpSahGG79DLK0D4M'
+  // Name of the OKR Registry sheet tab in your spreadsheet
+  // Import okr_registry.csv into this tab — see apps-script-meet-sync/okr_registry.csv
+  // Leave empty ('') to skip OKR mapping (tasks will show "Unmapped")
+  OKR_TAB_NAME: 'OKR Registry'
 };
 
 // ============================================================
@@ -89,93 +89,33 @@ function parseTitleFromInboxName(fileName) {
 // ============================================================
 
 /**
- * Fetch structured OKR context from the configured OKR_DOC_ID.
+ * Read OKR context from the OKR Registry sheet tab.
  *
- * Reads ALL tabs in the doc (uses getTabs() API, falls back to single body).
- * Parses down to Key Result level so the AI can produce specific KR references.
+ * The tab is populated from apps-script-meet-sync/okr_registry.csv.
+ * Columns: section(A), obj_num(B), objective(C), kr_num(D), kr_label(E), kr_text(F), active(G)
  *
- * Returns a prompt-ready string like:
- *   "TS Group > O1 > KR2: Becoming a top-2 best performing vendor for the top 10 debt buyers"
- * or empty string if OKR_DOC_ID is not set or fetch fails.
+ * Returns a prompt-ready string of "kr_label: kr_text" lines,
+ * or empty string if OKR_TAB_NAME is not set or the tab is missing.
  */
 function fetchOKRContext() {
-  if (!CONFIG.OKR_DOC_ID) return '';
+  if (!CONFIG.OKR_TAB_NAME) return '';
   try {
-    var doc     = DocumentApp.openById(CONFIG.OKR_DOC_ID);
-    var allText = '';
+    var ss    = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+    var sheet = ss.getSheetByName(CONFIG.OKR_TAB_NAME);
+    if (!sheet || sheet.getLastRow() <= 1) return '';
 
-    // getTabs() reads ALL tabs in multi-tab Google Docs (GAS V8, 2024+).
-    // Falls back to getBody() for single-tab docs or older runtime.
-    try {
-      var tabs = doc.getTabs();
-      if (tabs && tabs.length > 0) {
-        tabs.forEach(function(tab) {
-          try { allText += tab.asDocumentTab().getBody().getText() + '\n\n'; } catch(e) {}
-          try {
-            tab.getChildTabs().forEach(function(child) {
-              try { allText += child.asDocumentTab().getBody().getText() + '\n\n'; } catch(e) {}
-            });
-          } catch(e) {}
-        });
-      }
-    } catch(e) {}
+    var rows  = sheet.getRange(2, 1, sheet.getLastRow() - 1, 7).getValues();
+    var lines = rows
+      .filter(function(r) { return String(r[6]).toUpperCase() !== 'FALSE'; }) // G: active
+      .map(function(r)    { return r[4] + ': ' + r[5]; });                   // E: kr_label + F: kr_text
 
-    if (!allText) allText = doc.getBody().getText(); // single-tab fallback
-
-    // ── Parse into "[Section] > O[N] > KR[N]: description" lines ──────────
-    var okrLines        = [];
-    var currentSection  = '';
-    var currentObjNum   = '';
-    var inObjective     = false;
-    // Sections to skip (internal doc boilerplate, not OKR sections)
-    var SKIP_HEADERS    = /^(annual okrs|okrs|key results|cascade|dependencies|feedback|what.*not|northstar|summary|background|note|appendix)/i;
-
-    allText.split('\n').forEach(function(line) {
-      var t = line.trim().replace(/\*+/g, '').trim();
-      if (!t) return;
-
-      // Section headers (lines that start with # or ALL-CAPS org name)
-      if (/^#{1,4}\s/.test(t)) {
-        var header = t.replace(/^#+\s+/, '').trim();
-        if (!SKIP_HEADERS.test(header)) {
-          // Strip trailing " OKRs", "OKR", "2026 OKRs" etc.
-          currentSection = header.replace(/\s+[-–]?\s*(?:2026\s+)?OKRs?\s*$/i, '').trim();
-          inObjective    = false;
-        }
-        return;
-      }
-
-      // Objective line: "Objective N:" or "O1:" or "OKR 1 —"
-      var objMatch = t.match(/^(?:O(?:bjective)?\s*(\d+)[:\s–—-]+|OKR\s+(\d+)\s*[–—-]+)(.*)/i);
-      if (objMatch) {
-        currentObjNum = objMatch[1] || objMatch[2];
-        inObjective   = true;
-        return;
-      }
-
-      // Key Result line: numbered list "1.  text" or "KR1:" pattern, inside an objective
-      if (inObjective && currentSection && currentObjNum) {
-        var krMatch = t.match(/^(\d+)\.\s+(.+)/);
-        if (!krMatch) krMatch = t.match(/^KR\s*(\d+)[:\s]+(.+)/i);
-        if (krMatch) {
-          var krText = krMatch[2].trim()
-            .replace(/\*+/g, '')          // strip bold markers
-            .replace(/\s{2,}/g, ' ')      // collapse whitespace
-            .slice(0, 110);               // cap length
-          okrLines.push(
-            currentSection + ' > O' + currentObjNum + ' > KR' + krMatch[1] + ': ' + krText
-          );
-        }
-      }
-    });
-
-    if (okrLines.length === 0) return '';
+    if (!lines.length) return '';
 
     return [
       'Available OKRs — map each task to the single most specific matching KR:',
-      okrLines.join('\n'),
+      lines.join('\n'),
       '',
-      'okr_link format: "[Section] > O[N] > KR[N]: brief description" — or "Unmapped" if nothing fits.'
+      'okr_link: use the exact "Section > O[N] > KR[N]" label (without the description), or "Unmapped".'
     ].join('\n');
 
   } catch (e) {
