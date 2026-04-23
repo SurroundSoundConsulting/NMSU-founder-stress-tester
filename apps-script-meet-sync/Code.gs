@@ -89,30 +89,97 @@ function parseTitleFromInboxName(fileName) {
 // ============================================================
 
 /**
- * Fetch a condensed OKR list from the configured OKR_DOC_ID.
- * Extracts only Objective names (not KRs) to keep the prompt compact.
- * Returns a string ready for injection into the system prompt,
+ * Fetch structured OKR context from the configured OKR_DOC_ID.
+ *
+ * Reads ALL tabs in the doc (uses getTabs() API, falls back to single body).
+ * Parses down to Key Result level so the AI can produce specific KR references.
+ *
+ * Returns a prompt-ready string like:
+ *   "TS Group > O1 > KR2: Becoming a top-2 best performing vendor for the top 10 debt buyers"
  * or empty string if OKR_DOC_ID is not set or fetch fails.
  */
 function fetchOKRContext() {
   if (!CONFIG.OKR_DOC_ID) return '';
   try {
-    var text = DocumentApp.openById(CONFIG.OKR_DOC_ID).getBody().getText();
-    // Extract lines that look like Objective headings
-    var objectives = [];
-    text.split('\n').forEach(function(line) {
-      var t = line.trim();
-      // Match "Objective N:" or "Objective N:" bold patterns
-      if (/^objective\s+\d+/i.test(t) && t.length > 15) {
-        // Clean up markdown artifacts and truncate at 120 chars
-        var clean = t.replace(/\*+/g, '').replace(/^Objective\s+\d+[:\s–-]*/i, '').trim();
-        if (clean.length > 10) objectives.push('- ' + clean.slice(0, 120));
+    var doc     = DocumentApp.openById(CONFIG.OKR_DOC_ID);
+    var allText = '';
+
+    // getTabs() reads ALL tabs in multi-tab Google Docs (GAS V8, 2024+).
+    // Falls back to getBody() for single-tab docs or older runtime.
+    try {
+      var tabs = doc.getTabs();
+      if (tabs && tabs.length > 0) {
+        tabs.forEach(function(tab) {
+          try { allText += tab.asDocumentTab().getBody().getText() + '\n\n'; } catch(e) {}
+          try {
+            tab.getChildTabs().forEach(function(child) {
+              try { allText += child.asDocumentTab().getBody().getText() + '\n\n'; } catch(e) {}
+            });
+          } catch(e) {}
+        });
+      }
+    } catch(e) {}
+
+    if (!allText) allText = doc.getBody().getText(); // single-tab fallback
+
+    // ── Parse into "[Section] > O[N] > KR[N]: description" lines ──────────
+    var okrLines        = [];
+    var currentSection  = '';
+    var currentObjNum   = '';
+    var inObjective     = false;
+    // Sections to skip (internal doc boilerplate, not OKR sections)
+    var SKIP_HEADERS    = /^(annual okrs|okrs|key results|cascade|dependencies|feedback|what.*not|northstar|summary|background|note|appendix)/i;
+
+    allText.split('\n').forEach(function(line) {
+      var t = line.trim().replace(/\*+/g, '').trim();
+      if (!t) return;
+
+      // Section headers (lines that start with # or ALL-CAPS org name)
+      if (/^#{1,4}\s/.test(t)) {
+        var header = t.replace(/^#+\s+/, '').trim();
+        if (!SKIP_HEADERS.test(header)) {
+          // Strip trailing " OKRs", "OKR", "2026 OKRs" etc.
+          currentSection = header.replace(/\s+[-–]?\s*(?:2026\s+)?OKRs?\s*$/i, '').trim();
+          inObjective    = false;
+        }
+        return;
+      }
+
+      // Objective line: "Objective N:" or "O1:" or "OKR 1 —"
+      var objMatch = t.match(/^(?:O(?:bjective)?\s*(\d+)[:\s–—-]+|OKR\s+(\d+)\s*[–—-]+)(.*)/i);
+      if (objMatch) {
+        currentObjNum = objMatch[1] || objMatch[2];
+        inObjective   = true;
+        return;
+      }
+
+      // Key Result line: numbered list "1.  text" or "KR1:" pattern, inside an objective
+      if (inObjective && currentSection && currentObjNum) {
+        var krMatch = t.match(/^(\d+)\.\s+(.+)/);
+        if (!krMatch) krMatch = t.match(/^KR\s*(\d+)[:\s]+(.+)/i);
+        if (krMatch) {
+          var krText = krMatch[2].trim()
+            .replace(/\*+/g, '')          // strip bold markers
+            .replace(/\s{2,}/g, ' ')      // collapse whitespace
+            .slice(0, 110);               // cap length
+          okrLines.push(
+            currentSection + ' > O' + currentObjNum + ' > KR' + krMatch[1] + ': ' + krText
+          );
+        }
       }
     });
-    if (objectives.length === 0) return '';
-    return 'Company OKRs (Objectives only — map tasks to the most relevant one):\n' + objectives.join('\n');
+
+    if (okrLines.length === 0) return '';
+
+    return [
+      'Available OKRs — map each task to the single most specific matching KR:',
+      okrLines.join('\n'),
+      '',
+      'okr_link format: "[Section] > O[N] > KR[N]: brief description" — or "Unmapped" if nothing fits.'
+    ].join('\n');
+
   } catch (e) {
-    logSyncActivity('okr_fetch_error', '', '', 'Could not read OKR doc: ' + e.message);
+    logSyncActivity('okr_fetch_error', '', '', 'OKR fetch failed: ' + e.message);
     return '';
   }
 }
@@ -485,7 +552,8 @@ function parseWithHiveMind(transcriptText, meetingDate, okrContext) {
     'Reference date for resolving relative deadlines: ' + today + '.',
     '',
     okrContext ? okrContext + '\n' : '',
-    'For okr_link: choose the single most relevant Objective name from the list above, or "Unmapped" if nothing fits.',
+    'For okr_link: use the exact "[Section] > O[N] > KR[N]: description" label from the list above.',
+    'Pick the single most specific KR that the task directly advances. Use "Unmapped" only if nothing fits.',
     '',
     'Return ONLY valid JSON in exactly this format (no markdown fences):',
     '{',
@@ -499,7 +567,7 @@ function parseWithHiveMind(transcriptText, meetingDate, okrContext) {
     '      "next_step": "immediate next action or context",',
     '      "blockers": "what is blocking this, or None noted",',
     '      "dependencies": "comma-separated related tasks, or None noted",',
-    '      "okr_link": "OKR name or Unmapped",',
+    '      "okr_link": "[Section] > O[N] > KR[N]: description, or Unmapped",',
     '      "risk_flag": "high | medium | low or empty"',
     '    }',
     '  ],',
