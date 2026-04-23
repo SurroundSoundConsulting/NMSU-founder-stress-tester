@@ -521,6 +521,10 @@ function parseWithHiveMind(transcriptText, meetingDate, okrContext) {
     'Extract every action item explicitly or clearly implied. Omit discussion with no follow-up.'
   ].join('\n');
 
+  // Log what we're actually sending so we can verify OKR context is present
+  logSyncActivity('openai_prompt', '', '', 'model=' + CONFIG.OPENAI_MODEL + ' | systemPrompt=' + systemPrompt.length + ' chars | transcript=' + transcriptText.length + ' chars | okrInPrompt=' + (okrContext ? 'YES (' + okrContext.length + ' chars)' : 'NO'));
+  logSyncActivity('openai_prompt_head', '', '', 'System prompt first 500 chars: ' + systemPrompt.slice(0, 500).replace(/\n/g, ' | '));
+
   var payload = {
     model:       CONFIG.OPENAI_MODEL,
     temperature: 0.2,
@@ -546,10 +550,23 @@ function parseWithHiveMind(transcriptText, meetingDate, okrContext) {
   var body    = JSON.parse(response.getContentText());
   var content = body.choices[0].message.content;
 
+  // Log raw response so we can see exactly what GPT returned for okr_link
+  logSyncActivity('openai_raw', '', '', 'Raw response (' + content.length + ' chars): ' + content.slice(0, 800).replace(/\n/g, ' '));
+
   // Strip accidental markdown code fences
   content = content.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
 
-  return JSON.parse(content);
+  var parsed = JSON.parse(content);
+
+  // Log okr_link values for every action item — this is the final diagnostic
+  if (parsed && parsed.actionItems) {
+    var okrSummary = parsed.actionItems.map(function(item, i) {
+      return 'item' + i + '=[' + (item.okr_link || 'MISSING') + ']';
+    }).join(' | ');
+    logSyncActivity('openai_okr_links', '', '', okrSummary);
+  }
+
+  return parsed;
 }
 
 // ============================================================
@@ -762,7 +779,9 @@ function processInbox() {
   // Fetch OKR context once for the whole run (avoids one Doc open per file)
   var okrContext = fetchOKRContext();
   if (okrContext) {
-    logSyncActivity('okr_context', '', '', 'OKR context loaded (' + okrContext.length + ' chars)');
+    logSyncActivity('okr_context', '', '', 'OKR context loaded (' + okrContext.length + ' chars). First 300 chars: ' + okrContext.slice(0, 300));
+  } else {
+    logSyncActivity('okr_context_empty', '', '', 'fetchOKRContext() returned empty — OKR tab "' + CONFIG.OKR_TAB_NAME + '" missing or has no active rows. All tasks will be Unmapped.');
   }
 
   while (files.hasNext()) {
@@ -783,18 +802,18 @@ function processInbox() {
 
     try {
       var text = getAllTabsText(fileId);
+      logSyncActivity('doc_read', fileId, fileName, 'Text extracted: ' + text.length + ' chars across all tabs. Preview: ' + text.slice(0, 200).replace(/\n/g, ' '));
       if (!text || text.trim().length < 50) {
         logSyncActivity('skip', fileId, fileName, 'Document is empty or too short');
         continue;
       }
 
       // Extract meeting date and title from the "[HM YYYY-MM-DD] Original Title" filename.
-      // This is more reliable than metadata lookup because the copy has a different file ID
-      // than the source file that was logged in Processed Sources during Stage 1.
       var meetingDate  = parseDateFromInboxName(fileName)
                          || Utilities.formatDate(file.getLastUpdated(), 'UTC', 'yyyy-MM-dd');
       var meetingTitle = parseTitleFromInboxName(fileName) || fileName;
       var sourceType   = classifyDoc(meetingTitle) || 'unknown_meet_doc';
+      logSyncActivity('doc_meta', fileId, fileName, 'meetingDate=' + meetingDate + ' | meetingTitle=' + meetingTitle + ' | sourceType=' + sourceType + ' | okrContext=' + (okrContext ? okrContext.length + ' chars' : 'EMPTY'));
 
       // Run Hive Mind analysis
       var result = parseWithHiveMind(text, meetingDate, okrContext);
