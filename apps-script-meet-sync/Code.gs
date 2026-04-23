@@ -693,3 +693,70 @@ function processInbox() {
 
   logSyncActivity('process_done', '', '', 'Processing complete. ' + processed + ' file(s) processed.');
 }
+
+// ============================================================
+// BACKFILL — One-time historical hydration
+// ============================================================
+
+/**
+ * BACKFILL / HYDRATION — Run ONCE to seed the system from historical transcripts.
+ *
+ * This is NOT part of the recurring sync. Run it manually from the Apps Script IDE
+ * after initial setup to populate the command center with recent meeting history.
+ *
+ * Because it logs every source into Processed Sources, the recurring
+ * syncMeetArtifacts() trigger will automatically skip backfilled files going forward.
+ *
+ * @param {number} daysBack  How many days of history to include (default: CONFIG.BACKFILL_DAYS)
+ *
+ * Usage in Apps Script IDE:
+ *   backfillRecentTranscripts()        — uses CONFIG.BACKFILL_DAYS
+ *   backfillRecentTranscripts(14)      — last 14 days
+ *   backfillRecentTranscripts(3)       — last 3 days (for a quick test)
+ */
+function backfillRecentTranscripts(daysBack) {
+  daysBack = (typeof daysBack === 'number' && daysBack > 0) ? daysBack : CONFIG.BACKFILL_DAYS;
+
+  var now  = new Date();
+  var from = new Date(now.getTime() - daysBack * 24 * 60 * 60 * 1000);
+
+  logSyncActivity('backfill_start', '', '', 'Backfill: last ' + daysBack + ' days (from ' + from.toISOString() + ')');
+
+  var found = [];
+
+  // Calendar scan
+  try {
+    var calResults = discoverFromCalendar(from, now);
+    found = found.concat(calResults);
+    logSyncActivity('backfill_calendar', '', '', 'Calendar found ' + calResults.length + ' candidates');
+  } catch (e) {
+    logSyncActivity('backfill_calendar_skip', '', '', 'Calendar unavailable: ' + e.message);
+  }
+
+  // Drive scan
+  var driveResults = discoverFromDrive(from);
+  found = found.concat(driveResults);
+  logSyncActivity('backfill_drive', '', '', 'Drive found ' + driveResults.length + ' candidates');
+
+  // Deduplicate by fileId
+  var seen   = {};
+  var unique = found.filter(function(a) {
+    if (seen[a.fileId]) return false;
+    seen[a.fileId] = true;
+    return true;
+  });
+
+  logSyncActivity('backfill_dedup', '', '', unique.length + ' unique candidates after dedup');
+
+  var copied = 0;
+  unique.forEach(function(artifact) {
+    try {
+      if (copyToInbox(artifact)) copied++;
+    } catch (e) {
+      logSyncActivity('backfill_copy_error', artifact.fileId, artifact.fileName, e.message);
+    }
+  });
+
+  logSyncActivity('backfill_done', '', '',
+    'Backfill complete. Copied ' + copied + ' file(s). Run processInbox() to extract action items.');
+}
