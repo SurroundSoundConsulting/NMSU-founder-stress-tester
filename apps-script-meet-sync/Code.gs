@@ -308,3 +308,96 @@ function discoverFromDrive(from) {
 
   return results;
 }
+
+// ============================================================
+// INBOX COPY — Stage 1b: copy qualifying docs to shared inbox
+// ============================================================
+
+/**
+ * Copy a single Meet artifact doc to the shared Drive inbox.
+ * Skips without error if the file has already been logged in Processed Sources.
+ * Returns true if copied, false if skipped.
+ */
+function copyToInbox(artifact) {
+  // Idempotency check — ALWAYS runs first
+  if (isAlreadyProcessed(artifact.fileId, artifact.eventId)) {
+    logSyncActivity('skip', artifact.fileId, artifact.fileName, 'Already in Processed Sources — skipped');
+    return false;
+  }
+
+  var inboxFolder = DriveApp.getFolderById(CONFIG.INBOX_FOLDER_ID);
+  var sourceFile  = DriveApp.getFileById(artifact.fileId);
+
+  // Name the copy so it is easy to identify in the inbox
+  var copyName = '[HM ' + (artifact.meetingDate || 'unknown-date') + '] ' + artifact.fileName;
+  sourceFile.makeCopy(copyName, inboxFolder);
+
+  // Log as "copied" in Processed Sources — processed_at stays empty until Stage 2
+  logProcessedSource(
+    artifact.eventId,
+    artifact.fileId,
+    artifact.fileName,
+    artifact.sourceType,
+    artifact.meetingDate,
+    artifact.meetingTitle || artifact.fileName,
+    'copied'
+  );
+
+  logSyncActivity('copied', artifact.fileId, artifact.fileName, 'Copied to inbox as: ' + copyName);
+  return true;
+}
+
+// ============================================================
+// SYNC — Stage 1: Main entry point for recurring 15-minute trigger
+// ============================================================
+
+/**
+ * RECURRING SYNC — Set this as the time-driven trigger target (every 15 minutes).
+ *
+ * Discovers Google Meet artifacts created/modified in the last LOOKBACK_MINUTES,
+ * copies qualifying docs to the shared Drive inbox, and logs all activity.
+ * Does NOT process docs — call processInbox() separately (or chain it below if desired).
+ */
+function syncMeetArtifacts() {
+  var now  = new Date();
+  var from = new Date(now.getTime() - CONFIG.LOOKBACK_MINUTES * 60 * 1000);
+
+  logSyncActivity('sync_start', '', '', 'Window: ' + from.toISOString() + ' → ' + now.toISOString());
+
+  var found = [];
+
+  // Try Calendar first (requires Advanced Calendar Service)
+  try {
+    var calResults = discoverFromCalendar(from, now);
+    found = found.concat(calResults);
+    logSyncActivity('calendar_scan', '', '', 'Found ' + calResults.length + ' Calendar candidates');
+  } catch (e) {
+    logSyncActivity('calendar_skip', '', '', 'Calendar API unavailable — skipped: ' + e.message);
+  }
+
+  // Drive search always runs as fallback/supplement
+  var driveResults = discoverFromDrive(from);
+  found = found.concat(driveResults);
+  logSyncActivity('drive_scan', '', '', 'Found ' + driveResults.length + ' Drive candidates');
+
+  // Deduplicate by fileId (Calendar and Drive may find the same doc)
+  var seen = {};
+  var unique = found.filter(function(a) {
+    if (seen[a.fileId]) return false;
+    seen[a.fileId] = true;
+    return true;
+  });
+
+  logSyncActivity('dedup', '', '', unique.length + ' unique candidates after dedup');
+
+  var copied = 0;
+  unique.forEach(function(artifact) {
+    try {
+      if (copyToInbox(artifact)) copied++;
+    } catch (e) {
+      logSyncActivity('copy_error', artifact.fileId, artifact.fileName, e.message);
+    }
+  });
+
+  logSyncActivity('sync_done', '', '', 'Sync complete. Copied ' + copied + ' new file(s).');
+}
