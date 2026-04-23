@@ -401,3 +401,77 @@ function syncMeetArtifacts() {
 
   logSyncActivity('sync_done', '', '', 'Sync complete. Copied ' + copied + ' new file(s).');
 }
+
+// ============================================================
+// HIVE MIND — AI analysis via OpenAI
+// ============================================================
+
+/**
+ * Send transcript text to OpenAI using the Hive Mind system prompt.
+ * Returns { actionItems: [...], insights: [...], keyTopicsSummary: '' }
+ * Throws on API error or JSON parse failure — caller must handle.
+ *
+ * @param {string} transcriptText  Full text of the meeting document
+ * @param {string} meetingDate     YYYY-MM-DD anchor date for relative deadlines
+ */
+function parseWithHiveMind(transcriptText, meetingDate) {
+  var today = meetingDate || Utilities.formatDate(new Date(), 'UTC', 'yyyy-MM-dd');
+
+  var systemPrompt = [
+    'You are Hive Mind, an AI operations assistant. Extract structured action items from this meeting transcript.',
+    'Reference date for resolving relative deadlines: ' + today + '.',
+    '',
+    'Return ONLY valid JSON in exactly this format (no markdown fences):',
+    '{',
+    '  "actionItems": [',
+    '    {',
+    '      "task": "specific actionable description",',
+    '      "owner": "name or role (Unassigned if unclear)",',
+    '      "status": "open | pending | blocked | done",',
+    '      "urgency": 5,',
+    '      "due_date": "YYYY-MM-DD or empty string",',
+    '      "next_step": "immediate next action or context",',
+    '      "blockers": "what is blocking this, or None noted",',
+    '      "dependencies": "comma-separated related tasks, or None noted",',
+    '      "okr_link": "OKR name or Unmapped",',
+    '      "risk_flag": "high | medium | low or empty"',
+    '    }',
+    '  ],',
+    '  "insights": ["string insight"],',
+    '  "keyTopicsSummary": "one paragraph"',
+    '}',
+    '',
+    'Urgency scale: 9=immediate crisis, 7-8=critical, 5-6=high priority, 3-4=moderate, 1-2=low, 0=trivial.',
+    'Extract every action item explicitly or clearly implied. Omit discussion with no follow-up.'
+  ].join('\n');
+
+  var payload = {
+    model:       CONFIG.OPENAI_MODEL,
+    temperature: 0.2,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user',   content: 'Transcript:\n\n' + transcriptText }
+    ]
+  };
+
+  var response = UrlFetchApp.fetch('https://api.openai.com/v1/chat/completions', {
+    method:          'post',
+    contentType:     'application/json',
+    headers:         { 'Authorization': 'Bearer ' + CONFIG.OPENAI_API_KEY },
+    payload:         JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  var code = response.getResponseCode();
+  if (code !== 200) {
+    throw new Error('OpenAI ' + code + ': ' + response.getContentText().slice(0, 300));
+  }
+
+  var body    = JSON.parse(response.getContentText());
+  var content = body.choices[0].message.content;
+
+  // Strip accidental markdown code fences
+  content = content.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
+
+  return JSON.parse(content);
+}
