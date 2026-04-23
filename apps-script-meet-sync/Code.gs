@@ -848,3 +848,59 @@ function backfillRecentTranscripts(daysBack) {
   logSyncActivity('backfill_done', '', '',
     'Backfill complete. Copied ' + copied + ' file(s). Run processInbox() to extract action items.');
 }
+
+// ============================================================
+// DEBUG UTILITIES — Run manually from the Apps Script IDE
+// ============================================================
+
+/**
+ * diagnosConfig() — Run this from the IDE to verify CONFIG values are wired up correctly.
+ * Logs results to the Sync Log tab AND prints to the Apps Script execution log.
+ * Safe to run at any time — read-only, no side effects.
+ */
+function diagnoseConfig() {
+  var results = [];
+
+  // 1. Spreadsheet
+  try {
+    var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+    var tabNames = ss.getSheets().map(function(s) { return '"' + s.getName() + '"'; }).join(', ');
+    results.push('SPREADSHEET: OK — tabs found: ' + tabNames);
+  } catch(e) {
+    results.push('SPREADSHEET: ERROR — ' + e.message);
+  }
+
+  // 2. OKR Registry tab
+  try {
+    var ss2   = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+    var okrSheet = ss2.getSheetByName(CONFIG.OKR_TAB_NAME);
+    if (!okrSheet) {
+      results.push('OKR_TAB_NAME: NOT FOUND — looking for tab named "' + CONFIG.OKR_TAB_NAME + '"');
+    } else {
+      results.push('OKR_TAB_NAME: OK — ' + (okrSheet.getLastRow() - 1) + ' KR rows found');
+    }
+  } catch(e) {
+    results.push('OKR_TAB_NAME: ERROR — ' + e.message);
+  }
+
+  // 3. Inbox folder
+  try {
+    var folder = DriveApp.getFolderById(CONFIG.INBOX_FOLDER_ID);
+    var fileCount = 0;
+    var files = folder.getFiles();
+    while (files.hasNext()) { files.next(); fileCount++; }
+    results.push('INBOX_FOLDER: OK — "' + folder.getName() + '" contains ' + fileCount + ' file(s)');
+  } catch(e) {
+    results.push('INBOX_FOLDER: ERROR — ' + e.message);
+  }
+
+  // 4. OKR context load test
+  var ctx = fetchOKRContext();
+  results.push('OKR_CONTEXT: ' + (ctx ? ctx.length + ' chars loaded' : 'EMPTY — tab missing or no active rows'));
+
+  // Print to execution log and Sync Log
+  results.forEach(function(r) {
+    Logger.log(r);
+    logSyncActivity('diagnose', '', '', r);
+  });
+}
