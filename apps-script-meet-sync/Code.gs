@@ -488,16 +488,15 @@ function syncMeetArtifacts() {
 function parseWithHiveMind(transcriptText, meetingDate, okrContext) {
   var today = meetingDate || Utilities.formatDate(new Date(), 'UTC', 'yyyy-MM-dd');
 
+  // Prompt structure: JSON template FIRST so the model knows the output shape,
+  // with okr_link instruction embedded in the field itself.
+  // OKR list goes LAST so it is fresh in the model's attention when it fills in okr_link.
   var systemPrompt = [
-    'You are Hive Mind, an AI operations assistant. Extract structured action items from this meeting transcript.',
-    'Reference date for resolving relative deadlines: ' + today + '.',
+    'You are Hive Mind, an AI operations assistant.',
+    'Task: extract every action item from the meeting transcript, and map each one to an OKR Key Result.',
+    'Reference date for relative deadlines: ' + today + '.',
     '',
-    okrContext ? okrContext + '\n' : '',
-    'For okr_link: write the kr_label (the part before the colon) of the single most relevant KR from the list above.',
-    'Map even indirect or supporting tasks — a pricing analysis task maps to a revenue KR, a hiring task maps to a team-scaling KR.',
-    'Use "Unmapped" ONLY when the task has zero connection to any listed KR.',
-    '',
-    'Return ONLY valid JSON in exactly this format (no markdown fences):',
+    'Return ONLY valid JSON (no markdown fences):',
     '{',
     '  "actionItems": [',
     '    {',
@@ -509,7 +508,7 @@ function parseWithHiveMind(transcriptText, meetingDate, okrContext) {
     '      "next_step": "immediate next action or context",',
     '      "blockers": "what is blocking this, or None noted",',
     '      "dependencies": "comma-separated related tasks, or None noted",',
-    '      "okr_link": "TS Group > O1 > KR2",',
+    '      "okr_link": "COPY the kr_label from the OKR list below that this task most advances — e.g. US Kompato > O1 > KR1. Pricing/cost tasks → revenue or go-live KRs. Hiring → team-scaling KRs. Write Unmapped ONLY if no KR has any connection.",',
     '      "risk_flag": "high | medium | low or empty"',
     '    }',
     '  ],',
@@ -517,8 +516,10 @@ function parseWithHiveMind(transcriptText, meetingDate, okrContext) {
     '  "keyTopicsSummary": "one paragraph"',
     '}',
     '',
-    'Urgency scale: 9=immediate crisis, 7-8=critical, 5-6=high priority, 3-4=moderate, 1-2=low, 0=trivial.',
-    'Extract every action item explicitly or clearly implied. Omit discussion with no follow-up.'
+    'Urgency: 9=crisis, 7-8=critical, 5-6=high priority, 3-4=moderate, 1-2=low, 0=trivial.',
+    'Extract every action item explicitly or clearly implied. Omit discussion with no follow-up.',
+    '',
+    okrContext || 'No OKR list available — use "Unmapped" for all okr_link values.'
   ].join('\n');
 
   // Log what we're actually sending so we can verify OKR context is present
