@@ -114,10 +114,9 @@ function fetchOKRContext() {
     if (!lines.length) return '';
 
     return [
-      'Available OKRs — map each task to the single most specific matching KR:',
-      lines.join('\n'),
-      '',
-      'okr_link: use the exact "Section > O[N] > KR[N]" label (without the description), or "Unmapped".'
+      'COMPANY OKRs — each line is "kr_label: kr_description". The kr_label is the value to use in okr_link.',
+      'Example: if a task advances "Onboard 50% of the top 30 US debt buyers", write okr_link = "TS Group > O1 > KR1".',
+      lines.join('\n')
     ].join('\n');
 
   } catch (e) {
@@ -494,8 +493,9 @@ function parseWithHiveMind(transcriptText, meetingDate, okrContext) {
     'Reference date for resolving relative deadlines: ' + today + '.',
     '',
     okrContext ? okrContext + '\n' : '',
-    'For okr_link: use the exact "[Section] > O[N] > KR[N]: description" label from the list above.',
-    'Pick the single most specific KR that the task directly advances. Use "Unmapped" only if nothing fits.',
+    'For okr_link: write the kr_label (the part before the colon) of the single most relevant KR from the list above.',
+    'Map even indirect or supporting tasks — a pricing analysis task maps to a revenue KR, a hiring task maps to a team-scaling KR.',
+    'Use "Unmapped" ONLY when the task has zero connection to any listed KR.',
     '',
     'Return ONLY valid JSON in exactly this format (no markdown fences):',
     '{',
@@ -509,7 +509,7 @@ function parseWithHiveMind(transcriptText, meetingDate, okrContext) {
     '      "next_step": "immediate next action or context",',
     '      "blockers": "what is blocking this, or None noted",',
     '      "dependencies": "comma-separated related tasks, or None noted",',
-    '      "okr_link": "[Section] > O[N] > KR[N]: description, or Unmapped",',
+    '      "okr_link": "TS Group > O1 > KR2",',
     '      "risk_flag": "high | medium | low or empty"',
     '    }',
     '  ],',
