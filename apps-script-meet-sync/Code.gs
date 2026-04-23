@@ -201,3 +201,110 @@ function updateProcessedStatus(fileId, newStatus) {
     }
   }
 }
+
+// ============================================================
+// DISCOVERY — Find Meet artifact docs in Calendar and Drive
+// ============================================================
+
+/**
+ * Classify a document title as a Meet artifact type.
+ * Returns 'gemini_notes', 'meet_transcript', or null if not a Meet artifact.
+ */
+function classifyDoc(title) {
+  var t = (title || '').toLowerCase();
+  if (t.indexOf('notes by gemini') !== -1) return 'gemini_notes';
+  if (t.indexOf('meet transcript') !== -1) return 'meet_transcript';
+  if (t.indexOf('transcript')      !== -1) return 'meet_transcript';
+  return null;
+}
+
+/**
+ * Discover Meet artifact docs from Google Calendar event attachments.
+ *
+ * REQUIREMENT: Enable "Google Calendar API" under Services in Apps Script
+ * (Resources → Advanced Google Services → Calendar API → Enable).
+ * If not available, this function throws and syncMeetArtifacts() skips it gracefully.
+ *
+ * Returns array of: { eventId, fileId, fileName, meetingDate, meetingTitle, sourceType }
+ */
+function discoverFromCalendar(from, to) {
+  var results = [];
+  var events = Calendar.Events.list('primary', {
+    timeMin:             from.toISOString(),
+    timeMax:             to.toISOString(),
+    supportsAttachments: true,
+    singleEvents:        true,
+    maxResults:          50
+  });
+
+  if (!events || !events.items) return results;
+
+  events.items.forEach(function(event) {
+    if (!event.attachments || !event.attachments.length) return;
+
+    var meetingDate = '';
+    if (event.start && event.start.dateTime) {
+      meetingDate = event.start.dateTime.split('T')[0];
+    } else if (event.start && event.start.date) {
+      meetingDate = event.start.date;
+    }
+
+    event.attachments.forEach(function(att) {
+      if (att.mimeType !== 'application/vnd.google-apps.document') return;
+      var sourceType = classifyDoc(att.title || '');
+      if (!sourceType) return; // Not a Meet artifact
+
+      results.push({
+        eventId:      event.id,
+        fileId:       att.fileId,
+        fileName:     att.title || 'Untitled',
+        meetingDate:  meetingDate,
+        meetingTitle: event.summary || att.title || 'Untitled Meeting',
+        sourceType:   sourceType
+      });
+    });
+  });
+
+  return results;
+}
+
+/**
+ * Discover Meet artifact docs from Drive using title-pattern search.
+ * Works without Advanced Calendar Service — always runs as fallback.
+ *
+ * Returns array of: { eventId, fileId, fileName, meetingDate, meetingTitle, sourceType }
+ */
+function discoverFromDrive(from) {
+  var results = [];
+  // Drive search requires ISO date without the time component
+  var fromDateStr = Utilities.formatDate(from, 'UTC', 'yyyy-MM-dd');
+
+  CONFIG.MEET_TITLE_PATTERNS.forEach(function(pattern) {
+    var query = [
+      'title contains "' + pattern + '"',
+      'mimeType = "application/vnd.google-apps.document"',
+      'modifiedDate > "' + fromDateStr + '"'
+    ].join(' and ');
+
+    try {
+      var files = DriveApp.searchFiles(query);
+      while (files.hasNext()) {
+        var file = files.next();
+        var sourceType = classifyDoc(file.getName()) || 'unknown_meet_doc';
+        results.push({
+          eventId:      '',
+          fileId:       file.getId(),
+          fileName:     file.getName(),
+          meetingDate:  Utilities.formatDate(file.getLastUpdated(), 'UTC', 'yyyy-MM-dd'),
+          meetingTitle: file.getName(),
+          sourceType:   sourceType
+        });
+      }
+    } catch (e) {
+      // Log but continue — one bad pattern should not stop others
+      logSyncActivity('drive_search_error', '', '', 'Pattern "' + pattern + '" failed: ' + e.message);
+    }
+  });
+
+  return results;
+}
