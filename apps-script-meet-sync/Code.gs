@@ -801,7 +801,16 @@ function processInbox() {
     }
 
     try {
-      var text = getAllTabsText(fileId);
+      var text;
+      try {
+        text = getAllTabsText(fileId);
+      } catch(docErr) {
+        var hint = docErr.message.indexOf('openById') !== -1
+          ? 'DocumentApp cannot open this file. Likely cause: Shared Drive permissions or missing OAuth scope. Fix: delete file from inbox + re-authorize script, or manually copy its text into a new Doc.'
+          : docErr.message;
+        logSyncActivity('doc_open_error', fileId, fileName, hint);
+        continue;
+      }
       logSyncActivity('doc_read', fileId, fileName, 'Text extracted: ' + text.length + ' chars across all tabs. Preview: ' + text.slice(0, 200).replace(/\n/g, ' '));
       if (!text || text.trim().length < 50) {
         logSyncActivity('skip', fileId, fileName, 'Document is empty or too short');
