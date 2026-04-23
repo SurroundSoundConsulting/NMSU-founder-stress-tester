@@ -475,3 +475,149 @@ function parseWithHiveMind(transcriptText, meetingDate) {
 
   return JSON.parse(content);
 }
+
+// ============================================================
+// MASTER ACTION BOARD — Helpers
+// ============================================================
+
+/**
+ * Normalize text for dedup comparison.
+ * Mirrors normalizeForMatch() in lib/taskMerge.js:29–36.
+ * Lowercase + strip punctuation + collapse whitespace.
+ */
+function normalizeText(s) {
+  return String(s || '').toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Clamp urgency to an integer 0–9. Defaults to 5 if invalid.
+ */
+function clampUrgency(val) {
+  var n = parseInt(val, 10);
+  if (isNaN(n)) return 5;
+  return Math.min(9, Math.max(0, n));
+}
+
+/**
+ * Generate the next HM-#### Task ID by scanning the TASK_ID column of existingRows.
+ * Mirrors getNextTaskId() in lib/taskMerge.js:19–27.
+ */
+function generateTaskId(existingRows) {
+  var maxNum = 0;
+  existingRows.forEach(function(row) {
+    var id    = String(row[MASTER_COLS.TASK_ID] || '');
+    var match = id.match(/^HM-(\d+)$/);
+    if (match) {
+      var num = parseInt(match[1], 10);
+      if (num > maxNum) maxNum = num;
+    }
+  });
+  var next = String(maxNum + 1);
+  while (next.length < 4) next = '0' + next;
+  return 'HM-' + next;
+}
+
+/**
+ * Build a 16-element array for a Master Action Board row.
+ * Mirrors buildMasterRow() in lib/taskMerge.js:90–110.
+ */
+function buildMasterRow(item, meta, taskId, createdAt, updatedAt) {
+  return [
+    taskId,                                  // A task_id
+    item.task        || '(unspecified task)', // B task
+    item.owner       || 'Unassigned',        // C owner
+    item.status      || 'open',              // D status
+    clampUrgency(item.urgency),              // E urgency
+    item.due_date    || '',                  // F due_date
+    item.next_step   || '',                  // G next_step
+    item.blockers    || 'None noted',        // H blockers
+    item.dependencies|| 'None noted',        // I dependencies
+    item.okr_link    || 'Unmapped',          // J okr_link
+    item.risk_flag   || '',                  // K risk_flag
+    meta.fileId      || '',                  // L source_transcript_id (Drive file ID)
+    meta.fileName    || '',                  // M meeting_title
+    meta.meetingDate || '',                  // N meeting_date
+    createdAt,                               // O created_at
+    updatedAt                                // P updated_at
+  ];
+}
+
+/**
+ * Ensure the Master Action Board has the 16-column header row.
+ * Does nothing if the sheet already has rows.
+ */
+function ensureMasterHeaders(sheet) {
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow([
+      'task_id','task','owner','status','urgency','due_date',
+      'next_step','blockers','dependencies','okr_link','risk_flag',
+      'source_transcript_id','meeting_title','meeting_date','created_at','updated_at'
+    ]);
+  }
+}
+
+/**
+ * Write extracted action items to the Master Action Board.
+ * Uses rule-based dedup: normalizes task+owner+due_date and compares against
+ * existing rows before deciding to INSERT a new row or UPDATE an existing one.
+ * Preserves Task IDs (HM-####) and created_at on updates.
+ *
+ * @param {Array}  actionItems  Array of action item objects from parseWithHiveMind
+ * @param {Object} meta         { fileId, fileName, meetingDate, sourceType }
+ */
+function writeTasksToMasterBoard(actionItems, meta) {
+  var ss    = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var sheet = ss.getSheetByName(CONFIG.TAB_MASTER);
+  if (!sheet) throw new Error('Tab "' + CONFIG.TAB_MASTER + '" not found in spreadsheet');
+
+  ensureMasterHeaders(sheet);
+
+  // Read all existing data rows into memory (skip header row 1)
+  var lastRow      = sheet.getLastRow();
+  var existingRows = lastRow > 1
+    ? sheet.getRange(2, 1, lastRow - 1, 16).getValues()
+    : [];
+
+  var now = new Date().toISOString();
+
+  actionItems.forEach(function(item) {
+    var normTask  = normalizeText(item.task  || '');
+    if (!normTask) return; // Skip empty tasks
+
+    var normOwner = normalizeText(item.owner    || '');
+    var normDue   = normalizeText(item.due_date || '');
+
+    // Find matching existing row (task + owner + due_date all match)
+    var matchIdx = -1;
+    for (var i = 0; i < existingRows.length; i++) {
+      var r = existingRows[i];
+      if (
+        normalizeText(String(r[MASTER_COLS.TASK]     || '')) === normTask &&
+        normalizeText(String(r[MASTER_COLS.OWNER]    || '')) === normOwner &&
+        normalizeText(String(r[MASTER_COLS.DUE_DATE] || '')) === normDue
+      ) {
+        matchIdx = i;
+        break;
+      }
+    }
+
+    if (matchIdx >= 0) {
+      // UPDATE: preserve task_id and created_at
+      var existing   = existingRows[matchIdx];
+      var taskId     = String(existing[MASTER_COLS.TASK_ID]    || generateTaskId(existingRows));
+      var createdAt  = String(existing[MASTER_COLS.CREATED_AT] || now);
+      var updatedRow = buildMasterRow(item, meta, taskId, createdAt, now);
+
+      var sheetRowNum = matchIdx + 2; // +1 header + 1-based
+      sheet.getRange(sheetRowNum, 1, 1, 16).setValues([updatedRow]);
+      existingRows[matchIdx] = updatedRow;
+
+    } else {
+      // INSERT: allocate next HM-#### Task ID
+      var newTaskId = generateTaskId(existingRows);
+      var newRow    = buildMasterRow(item, meta, newTaskId, now, now);
+      sheet.appendRow(newRow);
+      existingRows.push(newRow); // keep in-memory snapshot current
+    }
+  });
+}
