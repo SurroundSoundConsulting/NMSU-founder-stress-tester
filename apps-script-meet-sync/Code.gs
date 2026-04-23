@@ -13,8 +13,10 @@ var CONFIG = {
   // OpenAI API key for Hive Mind analysis
   OPENAI_API_KEY: 'REPLACE_WITH_YOUR_OPENAI_API_KEY',
 
-  // OpenAI model — gpt-4o-mini is fast and cheap; gpt-4o is more accurate
-  OPENAI_MODEL: 'gpt-4o-mini',
+  // OpenAI model for transcript analysis + OKR mapping.
+  // gpt-4o is strongly recommended — gpt-4o-mini struggles to match tasks against
+  // large KR lists (137 entries) while simultaneously extracting action items.
+  OPENAI_MODEL: 'gpt-4o',
 
   // Sheet tab names — must match what exists in your spreadsheet
   TAB_MASTER:    'Master Action Board',
