@@ -699,6 +699,49 @@ function writeTasksToMasterBoard(actionItems, meta) {
 }
 
 // ============================================================
+// DOCUMENT TEXT EXTRACTION — Multi-tab aware
+// ============================================================
+
+/**
+ * Extract all text from a Google Doc, reading every tab.
+ *
+ * DocumentApp.getBody().getText() only reads tab 1. Gemini meeting notes
+ * typically put the summary on tab 1 and the full transcript on tab 2+.
+ * This function reads ALL tabs (and their children) so Hive Mind sees the
+ * complete transcript, not just the predigested summary.
+ *
+ * Falls back to single-body read if getTabs() is unavailable.
+ *
+ * @param  {string} fileId  Google Drive file ID of the Doc to read
+ * @return {string}         Full text of all tabs, separated by newlines
+ */
+function getAllTabsText(fileId) {
+  var doc     = DocumentApp.openById(fileId);
+  var allText = '';
+
+  try {
+    var tabs = doc.getTabs();
+    if (tabs && tabs.length > 0) {
+      tabs.forEach(function(tab) {
+        try { allText += tab.asDocumentTab().getBody().getText() + '\n\n'; } catch(e) {}
+        try {
+          tab.getChildTabs().forEach(function(child) {
+            try { allText += child.asDocumentTab().getBody().getText() + '\n\n'; } catch(e) {}
+          });
+        } catch(e) {}
+      });
+    }
+  } catch(e) {
+    // getTabs() not available — fall back to single body (tab 1 only)
+  }
+
+  // Fallback: single-tab doc or getTabs() threw
+  if (!allText) allText = doc.getBody().getText();
+
+  return allText.trim();
+}
+
+// ============================================================
 // PROCESS — Stage 2: Process inbox docs into Master Action Board
 // ============================================================
 
@@ -739,7 +782,7 @@ function processInbox() {
     }
 
     try {
-      var text = DocumentApp.openById(fileId).getBody().getText();
+      var text = getAllTabsText(fileId);
       if (!text || text.trim().length < 50) {
         logSyncActivity('skip', fileId, fileName, 'Document is empty or too short');
         continue;
