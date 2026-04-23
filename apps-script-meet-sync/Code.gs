@@ -29,7 +29,12 @@ var CONFIG = {
 
   // Title fragments that identify a doc as a Meet artifact
   // Add your own patterns if Gemini/Meet uses different naming in your Workspace
-  MEET_TITLE_PATTERNS: ['Notes by Gemini', 'Meeting transcript', 'Meet transcript']
+  MEET_TITLE_PATTERNS: ['Notes by Gemini', 'Meeting transcript', 'Meet transcript'],
+
+  // Google Doc ID containing your OKRs — paste the ID from the URL
+  // docs.google.com/document/d/DOC_ID/edit
+  // Leave empty to skip OKR mapping (tasks will show "Unmapped")
+  OKR_DOC_ID: '1znQIBtCw5pgLEWQKPrGJphdz5FQtpSahGG79DLK0D4M'
 };
 
 // ============================================================
@@ -54,6 +59,63 @@ var MASTER_COLS = {
   CREATED_AT:   14,  // O
   UPDATED_AT:   15   // P
 };
+
+// ============================================================
+// INBOX FILENAME HELPERS
+// The copy name format we write is: "[HM YYYY-MM-DD] Original Title"
+// These helpers extract meeting date and clean title from that prefix.
+// ============================================================
+
+/**
+ * Extract the meeting date from an inbox copy filename.
+ * Expects format: "[HM YYYY-MM-DD] ..."
+ * Returns YYYY-MM-DD or empty string if not found.
+ */
+function parseDateFromInboxName(fileName) {
+  var m = String(fileName || '').match(/^\[HM (\d{4}-\d{2}-\d{2})\]/);
+  return m ? m[1] : '';
+}
+
+/**
+ * Strip the "[HM YYYY-MM-DD] " prefix from an inbox copy filename.
+ * Returns the original meeting title.
+ */
+function parseTitleFromInboxName(fileName) {
+  return String(fileName || '').replace(/^\[HM \d{4}-\d{2}-\d{2}\]\s*/, '');
+}
+
+// ============================================================
+// OKR CONTEXT — Fetched once per processInbox() run
+// ============================================================
+
+/**
+ * Fetch a condensed OKR list from the configured OKR_DOC_ID.
+ * Extracts only Objective names (not KRs) to keep the prompt compact.
+ * Returns a string ready for injection into the system prompt,
+ * or empty string if OKR_DOC_ID is not set or fetch fails.
+ */
+function fetchOKRContext() {
+  if (!CONFIG.OKR_DOC_ID) return '';
+  try {
+    var text = DocumentApp.openById(CONFIG.OKR_DOC_ID).getBody().getText();
+    // Extract lines that look like Objective headings
+    var objectives = [];
+    text.split('\n').forEach(function(line) {
+      var t = line.trim();
+      // Match "Objective N:" or "Objective N:" bold patterns
+      if (/^objective\s+\d+/i.test(t) && t.length > 15) {
+        // Clean up markdown artifacts and truncate at 120 chars
+        var clean = t.replace(/\*+/g, '').replace(/^Objective\s+\d+[:\s–-]*/i, '').trim();
+        if (clean.length > 10) objectives.push('- ' + clean.slice(0, 120));
+      }
+    });
+    if (objectives.length === 0) return '';
+    return 'Company OKRs (Objectives only — map tasks to the most relevant one):\n' + objectives.join('\n');
+  } catch (e) {
+    logSyncActivity('okr_fetch_error', '', '', 'Could not read OKR doc: ' + e.message);
+    return '';
+  }
+}
 
 // ============================================================
 // SYNC LOG — Audit trail for every pipeline action
@@ -413,13 +475,17 @@ function syncMeetArtifacts() {
  *
  * @param {string} transcriptText  Full text of the meeting document
  * @param {string} meetingDate     YYYY-MM-DD anchor date for relative deadlines
+ * @param {string=} okrContext     Optional OKR list to inject (from fetchOKRContext())
  */
-function parseWithHiveMind(transcriptText, meetingDate) {
+function parseWithHiveMind(transcriptText, meetingDate, okrContext) {
   var today = meetingDate || Utilities.formatDate(new Date(), 'UTC', 'yyyy-MM-dd');
 
   var systemPrompt = [
     'You are Hive Mind, an AI operations assistant. Extract structured action items from this meeting transcript.',
     'Reference date for resolving relative deadlines: ' + today + '.',
+    '',
+    okrContext ? okrContext + '\n' : '',
+    'For okr_link: choose the single most relevant Objective name from the list above, or "Unmapped" if nothing fits.',
     '',
     'Return ONLY valid JSON in exactly this format (no markdown fences):',
     '{',
@@ -640,6 +706,12 @@ function processInbox() {
 
   logSyncActivity('process_start', '', '', 'Scanning inbox for unprocessed docs...');
 
+  // Fetch OKR context once for the whole run (avoids one Doc open per file)
+  var okrContext = fetchOKRContext();
+  if (okrContext) {
+    logSyncActivity('okr_context', '', '', 'OKR context loaded (' + okrContext.length + ' chars)');
+  }
+
   while (files.hasNext()) {
     var file     = files.next();
     var fileId   = file.getId();
@@ -648,7 +720,9 @@ function processInbox() {
     // Only handle Google Docs
     if (file.getMimeType() !== 'application/vnd.google-apps.document') continue;
 
-    // Idempotency: skip if already fully processed
+    // Idempotency: skip if already fully processed.
+    // NOTE: We check by the COPY's file ID (inbox file ID), not the source ID.
+    // The copy ID is logged into Processed Sources at the end of this loop.
     if (isProcessedStatus(fileId, 'processed')) {
       logSyncActivity('skip', fileId, fileName, 'Status = processed — skipped');
       continue;
@@ -661,14 +735,16 @@ function processInbox() {
         continue;
       }
 
-      // Look up metadata written during copyToInbox
-      var meta         = getSourceMetadata(fileId);
-      var meetingDate  = meta ? meta.meeting_date  : Utilities.formatDate(file.getLastUpdated(), 'UTC', 'yyyy-MM-dd');
-      var meetingTitle = meta ? meta.meeting_title : fileName;
-      var sourceType   = meta ? meta.source_type   : 'unknown_meet_doc';
+      // Extract meeting date and title from the "[HM YYYY-MM-DD] Original Title" filename.
+      // This is more reliable than metadata lookup because the copy has a different file ID
+      // than the source file that was logged in Processed Sources during Stage 1.
+      var meetingDate  = parseDateFromInboxName(fileName)
+                         || Utilities.formatDate(file.getLastUpdated(), 'UTC', 'yyyy-MM-dd');
+      var meetingTitle = parseTitleFromInboxName(fileName) || fileName;
+      var sourceType   = classifyDoc(meetingTitle) || 'unknown_meet_doc';
 
       // Run Hive Mind analysis
-      var result = parseWithHiveMind(text, meetingDate);
+      var result = parseWithHiveMind(text, meetingDate, okrContext);
 
       if (!result || !result.actionItems || result.actionItems.length === 0) {
         logSyncActivity('no_tasks', fileId, fileName, 'Hive Mind returned 0 action items');
@@ -682,8 +758,10 @@ function processInbox() {
         logSyncActivity('processed', fileId, fileName, 'Wrote ' + result.actionItems.length + ' tasks to Master board');
       }
 
-      // Mark as fully processed — prevents reprocessing on next run
-      updateProcessedStatus(fileId, 'processed');
+      // Log the COPY's file ID as processed so future runs skip it.
+      // (We use logProcessedSource rather than updateProcessedStatus because the copy ID
+      // was never added to Processed Sources — only the source ID was, during Stage 1.)
+      logProcessedSource('', fileId, meetingTitle, sourceType, meetingDate, meetingTitle, 'processed');
       processed++;
 
     } catch (e) {
