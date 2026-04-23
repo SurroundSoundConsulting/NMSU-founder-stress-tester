@@ -621,3 +621,75 @@ function writeTasksToMasterBoard(actionItems, meta) {
     }
   });
 }
+
+// ============================================================
+// PROCESS — Stage 2: Process inbox docs into Master Action Board
+// ============================================================
+
+/**
+ * INBOX PROCESSOR — Run after syncMeetArtifacts() to extract action items.
+ *
+ * Reads every Google Doc in the shared inbox folder, runs Hive Mind analysis,
+ * and writes structured rows into the Master Action Board.
+ * Safe to run multiple times — already-processed files are skipped.
+ */
+function processInbox() {
+  var inboxFolder = DriveApp.getFolderById(CONFIG.INBOX_FOLDER_ID);
+  var files       = inboxFolder.getFiles();
+  var processed   = 0;
+
+  logSyncActivity('process_start', '', '', 'Scanning inbox for unprocessed docs...');
+
+  while (files.hasNext()) {
+    var file     = files.next();
+    var fileId   = file.getId();
+    var fileName = file.getName();
+
+    // Only handle Google Docs
+    if (file.getMimeType() !== 'application/vnd.google-apps.document') continue;
+
+    // Idempotency: skip if already fully processed
+    if (isProcessedStatus(fileId, 'processed')) {
+      logSyncActivity('skip', fileId, fileName, 'Status = processed — skipped');
+      continue;
+    }
+
+    try {
+      var text = DocumentApp.openById(fileId).getBody().getText();
+      if (!text || text.trim().length < 50) {
+        logSyncActivity('skip', fileId, fileName, 'Document is empty or too short');
+        continue;
+      }
+
+      // Look up metadata written during copyToInbox
+      var meta         = getSourceMetadata(fileId);
+      var meetingDate  = meta ? meta.meeting_date  : Utilities.formatDate(file.getLastUpdated(), 'UTC', 'yyyy-MM-dd');
+      var meetingTitle = meta ? meta.meeting_title : fileName;
+      var sourceType   = meta ? meta.source_type   : 'unknown_meet_doc';
+
+      // Run Hive Mind analysis
+      var result = parseWithHiveMind(text, meetingDate);
+
+      if (!result || !result.actionItems || result.actionItems.length === 0) {
+        logSyncActivity('no_tasks', fileId, fileName, 'Hive Mind returned 0 action items');
+      } else {
+        writeTasksToMasterBoard(result.actionItems, {
+          fileId:      fileId,
+          fileName:    meetingTitle,
+          meetingDate: meetingDate,
+          sourceType:  sourceType
+        });
+        logSyncActivity('processed', fileId, fileName, 'Wrote ' + result.actionItems.length + ' tasks to Master board');
+      }
+
+      // Mark as fully processed — prevents reprocessing on next run
+      updateProcessedStatus(fileId, 'processed');
+      processed++;
+
+    } catch (e) {
+      logSyncActivity('process_error', fileId, fileName, 'Error: ' + e.message);
+    }
+  }
+
+  logSyncActivity('process_done', '', '', 'Processing complete. ' + processed + ' file(s) processed.');
+}
