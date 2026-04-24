@@ -14,9 +14,9 @@ var CONFIG = {
   OPENAI_API_KEY: 'REPLACE_WITH_YOUR_OPENAI_API_KEY',
 
   // OpenAI model for transcript analysis + OKR mapping.
-  // gpt-4o is strongly recommended — gpt-4o-mini struggles to match tasks against
-  // large KR lists (137 entries) while simultaneously extracting action items.
-  OPENAI_MODEL: 'gpt-4o',
+  // gpt-5 uses the new Responses API (/v1/responses); gpt-4o uses Chat Completions (/v1/chat/completions).
+  // The code auto-selects the correct endpoint and response parsing based on this value.
+  OPENAI_MODEL: 'gpt-5',
 
   // Sheet tab names — must match what exists in your spreadsheet
   TAB_MASTER:    'Master Action Board',
@@ -359,7 +359,8 @@ function discoverFromDrive(from) {
     var query = [
       'title contains "' + pattern + '"',
       'mimeType = "application/vnd.google-apps.document"',
-      'modifiedDate > "' + fromDateStr + '"'
+      'modifiedDate > "' + fromDateStr + '"',
+      'not "' + CONFIG.INBOX_FOLDER_ID + '" in parents'
     ].join(' and ');
 
     try {
@@ -567,16 +568,33 @@ function parseWithHiveMind(transcriptText, meetingDate, okrContext) {
   logSyncActivity('openai_prompt', '', '', 'model=' + CONFIG.OPENAI_MODEL + ' | systemPrompt=' + systemPrompt.length + ' chars | transcript=' + transcriptText.length + ' chars | okrInPrompt=' + (okrContext ? 'YES (' + okrContext.length + ' chars)' : 'NO'));
   logSyncActivity('openai_prompt_head', '', '', 'System prompt first 500 chars: ' + systemPrompt.slice(0, 500).replace(/\n/g, ' | '));
 
-  var payload = {
-    model:       CONFIG.OPENAI_MODEL,
-    temperature: 0.2,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user',   content: 'Transcript:\n\n' + transcriptText }
-    ]
-  };
+  // gpt-5+ uses the Responses API; gpt-4o and earlier use Chat Completions.
+  var isResponsesApi = !CONFIG.OPENAI_MODEL.startsWith('gpt-4');
 
-  var response = UrlFetchApp.fetch('https://api.openai.com/v1/chat/completions', {
+  var payload, endpoint;
+  if (isResponsesApi) {
+    // Responses API — /v1/responses
+    endpoint = 'https://api.openai.com/v1/responses';
+    payload = {
+      model:        CONFIG.OPENAI_MODEL,
+      temperature:  0.2,
+      instructions: systemPrompt,
+      input:        'Transcript:\n\n' + transcriptText
+    };
+  } else {
+    // Chat Completions API — /v1/chat/completions (gpt-4o and earlier)
+    endpoint = 'https://api.openai.com/v1/chat/completions';
+    payload = {
+      model:       CONFIG.OPENAI_MODEL,
+      temperature: 0.2,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user',   content: 'Transcript:\n\n' + transcriptText }
+      ]
+    };
+  }
+
+  var response = UrlFetchApp.fetch(endpoint, {
     method:          'post',
     contentType:     'application/json',
     headers:         { 'Authorization': 'Bearer ' + CONFIG.OPENAI_API_KEY },
@@ -590,7 +608,9 @@ function parseWithHiveMind(transcriptText, meetingDate, okrContext) {
   }
 
   var body    = JSON.parse(response.getContentText());
-  var content = body.choices[0].message.content;
+  var content = isResponsesApi
+    ? body.output_text
+    : body.choices[0].message.content;
 
   // Log raw response so we can see exactly what GPT returned for okr_link
   logSyncActivity('openai_raw', '', '', 'Raw response (' + content.length + ' chars): ' + content.slice(0, 800).replace(/\n/g, ' '));
