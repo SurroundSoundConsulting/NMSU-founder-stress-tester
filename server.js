@@ -7,6 +7,8 @@
  *   GOOGLE_SHEETS_TAB_NAME or GOOGLE_SHEETS_TAB,
  *   GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_SERVICE_ACCOUNT_KEY_FILE or GOOGLE_SERVICE_ACCOUNT_JSON — see lib/googleSheets.js
  * Week 4: FIREFLIES_API_KEY, POLL_LOOKBACK_MINUTES, BACKFILL_LOOKBACK_DAYS — see fireflies-polling/
+ * Week 5: EXECUTION_DRIVE_FOLDER_ID, EXECUTION_CLASSIFY_MODEL, EXECUTION_MODEL, EXECUTION_DRY_RUN,
+ *   EXECUTION_CONTEXT_DOC_MAX_CHARS_PER_FILE / _TOTAL / _MAX_FILES — see lib/executionWorkbench.js
  */
 
 // Load .env from this file's directory (project root), not from wherever the shell
@@ -46,6 +48,7 @@ const {
 } = require("./lib/googleSheets");
 const { analyzeTranscriptToHiveMind, DEFAULT_MODEL } = require("./lib/hiveMind");
 const { runFirefliesJob } = require("./fireflies-polling/run");
+const { runExecutionWorkbenchOnce } = require("./lib/executionWorkbench");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -99,6 +102,39 @@ app.post("/api/fireflies/run", async (req, res) => {
     console.error(err);
     return res.status(500).json({
       error: String(err?.message || err),
+    });
+  }
+});
+
+/**
+ * POST /api/execution/run — Week 5 task execution workbench (classify + optional LLM + Google Doc).
+ */
+app.post("/api/execution/run", async (req, res) => {
+  if (!isGoogleSheetsConfigured()) {
+    return res.status(503).json({
+      error: "Google Sheets is not configured on this server.",
+      code: "SHEETS_NOT_CONFIGURED",
+    });
+  }
+  const apiKey = String(process.env.OPENAI_API_KEY || "").trim();
+  if (!apiKey) {
+    return res.status(500).json({
+      error: "OPENAI_API_KEY is not set.",
+      code: "NO_OPENAI",
+    });
+  }
+  try {
+    const out = await runExecutionWorkbenchOnce();
+    return res.json(out);
+  } catch (err) {
+    console.error(err);
+    const code = err?.code;
+    if (code === "NO_OPENAI") {
+      return res.status(500).json({ error: err.message, code });
+    }
+    return res.status(500).json({
+      error: String(err?.message || err),
+      code: code || "EXECUTION_ERROR",
     });
   }
 });
