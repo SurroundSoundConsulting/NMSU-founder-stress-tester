@@ -8,7 +8,9 @@
     "dev": "node server.js",
     "fireflies:poll": "node fireflies-polling/run.js poll",
     "fireflies:backfill": "node fireflies-polling/run.js backfill",
-    "execution:run": "node lib/executionWorkbenchCli.js"
+    "execution:run": "node lib/executionWorkbenchCli.js",
+    "enforcer:run": "node lib/enforcerCli.js",
+    "enforcer:feedback": "node lib/enforcerCli.js --feedback"
   },
   "keywords": [],
   "author": "",

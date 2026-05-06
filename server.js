@@ -9,6 +9,8 @@
  * Week 4: FIREFLIES_API_KEY, POLL_LOOKBACK_MINUTES, BACKFILL_LOOKBACK_DAYS — see fireflies-polling/
  * Week 5: EXECUTION_DRIVE_FOLDER_ID, EXECUTION_CLASSIFY_MODEL, EXECUTION_MODEL, EXECUTION_DRY_RUN,
  *   EXECUTION_CONTEXT_DOC_MAX_CHARS_PER_FILE / _TOTAL / _MAX_FILES — see lib/executionWorkbench.js
+ * Week 6: ENFORCER_QUALITY_THRESHOLD, ENFORCER_MIN_IMPROVEMENT_DELTA, ENFORCER_MAX_REVISION_ATTEMPTS,
+ *   ENFORCER_MODEL, LEARNINGS_DRIVE_FOLDER_ID, LEARNINGS_JUDGMENT_LOG_FILE_ID, LEARNINGS_PROJECT_RULES_FILE_ID — see lib/enforcerWorkbench.js
  */
 
 // Load .env from this file's directory (project root), not from wherever the shell
@@ -49,6 +51,7 @@ const {
 const { analyzeTranscriptToHiveMind, DEFAULT_MODEL } = require("./lib/hiveMind");
 const { runFirefliesJob } = require("./fireflies-polling/run");
 const { runExecutionWorkbenchOnce } = require("./lib/executionWorkbench");
+const { runEnforcerOnce, runFeedbackIngestOnce } = require("./lib/enforcerWorkbench");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -135,6 +138,76 @@ app.post("/api/execution/run", async (req, res) => {
     return res.status(500).json({
       error: String(err?.message || err),
       code: code || "EXECUTION_ERROR",
+    });
+  }
+});
+
+/**
+ * POST /api/enforcer/run — Week 6 Enforcer (score + revision loop + optional feedback ingest).
+ * Body: { task_id?: string, force?: boolean, ingest_feedback?: boolean }
+ */
+app.post("/api/enforcer/run", async (req, res) => {
+  if (!isGoogleSheetsConfigured()) {
+    return res.status(503).json({
+      error: "Google Sheets is not configured on this server.",
+      code: "SHEETS_NOT_CONFIGURED",
+    });
+  }
+  const apiKey = String(process.env.OPENAI_API_KEY || "").trim();
+  if (!apiKey) {
+    return res.status(500).json({
+      error: "OPENAI_API_KEY is not set.",
+      code: "NO_OPENAI",
+    });
+  }
+  try {
+    const out = await runEnforcerOnce({
+      taskId: req.body?.task_id,
+      force: Boolean(req.body?.force),
+      ingestFeedback: Boolean(req.body?.ingest_feedback),
+      apiKey,
+    });
+    return res.json(out);
+  } catch (err) {
+    console.error(err);
+    const code = err?.code;
+    return res.status(500).json({
+      error: String(err?.message || err),
+      code: code || "ENFORCER_ERROR",
+    });
+  }
+});
+
+/**
+ * POST /api/enforcer/feedback — ingest reviewer notes / GENERAL RULE from Doc for a task row.
+ * Body: { task_id: string }
+ */
+app.post("/api/enforcer/feedback", async (req, res) => {
+  if (!isGoogleSheetsConfigured()) {
+    return res.status(503).json({
+      error: "Google Sheets is not configured on this server.",
+      code: "SHEETS_NOT_CONFIGURED",
+    });
+  }
+  const apiKey = String(process.env.OPENAI_API_KEY || "").trim();
+  if (!apiKey) {
+    return res.status(500).json({
+      error: "OPENAI_API_KEY is not set.",
+      code: "NO_OPENAI",
+    });
+  }
+  const taskId = String(req.body?.task_id || "").trim();
+  if (!taskId) {
+    return res.status(400).json({ error: "Missing task_id in JSON body." });
+  }
+  try {
+    const out = await runFeedbackIngestOnce({ taskId, apiKey });
+    return res.json(out);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({
+      error: String(err?.message || err),
+      code: err?.code || "FEEDBACK_ERROR",
     });
   }
 });
