@@ -10,7 +10,7 @@
  * Week 5: EXECUTION_DRIVE_FOLDER_ID, EXECUTION_CLASSIFY_MODEL, EXECUTION_MODEL, EXECUTION_DRY_RUN,
  *   EXECUTION_CONTEXT_DOC_MAX_CHARS_PER_FILE / _TOTAL / _MAX_FILES — see lib/executionWorkbench.js
  * Week 6: ENFORCER_QUALITY_THRESHOLD, ENFORCER_MIN_IMPROVEMENT_DELTA, ENFORCER_MAX_REVISION_ATTEMPTS,
- *   ENFORCER_MODEL, LEARNINGS_DRIVE_FOLDER_ID, LEARNINGS_JUDGMENT_LOG_FILE_ID, LEARNINGS_PROJECT_RULES_FILE_ID — see lib/enforcerWorkbench.js
+ *   ENFORCER_MODEL, ENFORCER_RESCORE_AFTER_FEEDBACK, ENFORCER_REVISION_AFTER_FEEDBACK, LEARNINGS_DRIVE_FOLDER_ID, LEARNINGS_JUDGMENT_LOG_FILE_ID, LEARNINGS_PROJECT_RULES_FILE_ID — see lib/enforcerWorkbench.js
  */
 
 // Load .env from this file's directory (project root), not from wherever the shell
@@ -180,7 +180,7 @@ app.post("/api/enforcer/run", async (req, res) => {
 
 /**
  * POST /api/enforcer/feedback — ingest reviewer notes / GENERAL RULE from Doc for a task row.
- * Body: { task_id: string }
+ * Body: { task_id: string, rescore?: boolean, revision?: boolean } — revision creates a new Doc from reviewer notes; rescore runs QA after (defaults true)
  */
 app.post("/api/enforcer/feedback", async (req, res) => {
   if (!isGoogleSheetsConfigured()) {
@@ -201,7 +201,12 @@ app.post("/api/enforcer/feedback", async (req, res) => {
     return res.status(400).json({ error: "Missing task_id in JSON body." });
   }
   try {
-    const out = await runFeedbackIngestOnce({ taskId, apiKey });
+    const out = await runFeedbackIngestOnce({
+      taskId,
+      apiKey,
+      rescore: req.body?.rescore,
+      revision: req.body?.revision,
+    });
     return res.json(out);
   } catch (err) {
     console.error(err);
