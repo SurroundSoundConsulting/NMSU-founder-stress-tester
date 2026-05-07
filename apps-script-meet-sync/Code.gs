@@ -1410,6 +1410,31 @@ function writeClassificationToRow_(sheet, rowNum, c, statusInfo) {
 }
 
 /**
+ * Scan column W (Latest Execution ID) for EX-#### values and return the next one.
+ * Format: EX-0001, EX-0002, ... zero-padded to 4 digits.
+ *
+ * @param {Sheet} sheet  Master Action Board sheet
+ * @return {string}      Next monotonic EX-#### ID
+ */
+function generateExecutionId_(sheet) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return 'EX-0001';
+
+  var ids = sheet.getRange(2, EXECUTION_COLS.LATEST_EXECUTION_ID + 1, lastRow - 1, 1).getValues();
+  var max = 0;
+  for (var i = 0; i < ids.length; i++) {
+    var m = String(ids[i][0] || '').match(/^EX-(\d+)$/);
+    if (m) {
+      var n = parseInt(m[1], 10);
+      if (n > max) max = n;
+    }
+  }
+
+  var next = max + 1;
+  return 'EX-' + ('0000' + next).slice(-4);
+}
+
+/**
  * Entrypoint for both the menu item and the hourly time trigger.
  */
 function runExecutionWorkbench() {
