@@ -1508,6 +1508,60 @@ function createExecutionDoc_(rowValues, classification, output, executionId) {
 }
 
 /**
+ * Run the execution LLM against a generated prompt. Returns the raw output text.
+ * Uses the same endpoint-routing as classifyTask_; minimal system instructions —
+ * the classifier owns task framing, the executor just produces the deliverable.
+ */
+function executeTask_(generatedPrompt, taskId) {
+  if (!generatedPrompt) throw new Error('executeTask_ called with empty generated_prompt');
+
+  var systemPrompt = 'You are an execution assistant. Produce the deliverable described in the user\'s prompt. Output only the deliverable; no preamble or explanation.';
+
+  logSyncActivity('exec_run_prompt', taskId, '', 'first 200 chars: ' + generatedPrompt.slice(0, 200).replace(/\n/g, ' '));
+
+  var isResponsesApi = !CONFIG.OPENAI_MODEL.startsWith('gpt-4');
+  var endpoint, payload;
+  if (isResponsesApi) {
+    // gpt-5 Responses API rejects `temperature` (HTTP 400). Do NOT add it.
+    endpoint = 'https://api.openai.com/v1/responses';
+    payload = {
+      model:        CONFIG.OPENAI_MODEL,
+      instructions: systemPrompt,
+      input:        generatedPrompt
+    };
+  } else {
+    endpoint = 'https://api.openai.com/v1/chat/completions';
+    payload = {
+      model:       CONFIG.OPENAI_MODEL,
+      temperature: 0.2,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user',   content: generatedPrompt }
+      ]
+    };
+  }
+
+  var response = UrlFetchApp.fetch(endpoint, {
+    method:          'post',
+    contentType:     'application/json',
+    headers:         { 'Authorization': 'Bearer ' + CONFIG.OPENAI_API_KEY },
+    payload:         JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  var status = response.getResponseCode();
+  var body   = response.getContentText();
+  if (status < 200 || status >= 300) {
+    throw new Error('Executor HTTP ' + status + ': ' + body.slice(0, 400));
+  }
+
+  var output = extractOpenAIText_(body, isResponsesApi);
+  logSyncActivity('exec_run_raw', taskId, '', 'first 800 chars: ' + output.slice(0, 800));
+
+  return output;
+}
+
+/**
  * Entrypoint for both the menu item and the hourly time trigger.
  */
 function runExecutionWorkbench() {
