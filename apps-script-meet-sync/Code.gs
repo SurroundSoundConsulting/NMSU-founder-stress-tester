@@ -1684,3 +1684,52 @@ function runExecutionWorkbench() {
     lock.releaseLock();
   }
 }
+
+/**
+ * Apps Script lifecycle hook. Runs every time the spreadsheet is opened
+ * by an editor user. Adds the "Execution Workbench" menu.
+ *
+ * Note: simple triggers like onOpen run as the user, with limited auth.
+ * This menu only adds menu items — the menu actions themselves run with
+ * full auth when clicked.
+ */
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('Execution Workbench')
+    .addItem('Run execution workbench', 'runExecutionWorkbench')
+    .addItem('Install / refresh hourly trigger', 'setupExecutionTrigger_')
+    .addItem('Remove hourly trigger', 'removeExecutionTrigger_')
+    .addToUi();
+}
+
+/**
+ * Idempotent. Removes any existing time triggers for runExecutionWorkbench
+ * and creates a fresh hourly trigger. Run this once per project deployment.
+ */
+function setupExecutionTrigger_() {
+  removeExecutionTrigger_();
+  ScriptApp.newTrigger('runExecutionWorkbench')
+    .timeBased()
+    .everyHours(1)
+    .create();
+  SpreadsheetApp.getUi().alert('Hourly trigger installed for runExecutionWorkbench.');
+  logSyncActivity('exec_trigger_install', '', '', 'Hourly trigger created.');
+}
+
+/**
+ * Removes any time-based triggers pointing at runExecutionWorkbench.
+ * Safe to call when none exist (no-op).
+ */
+function removeExecutionTrigger_() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var removed  = 0;
+  triggers.forEach(function(t) {
+    if (t.getHandlerFunction() === 'runExecutionWorkbench') {
+      ScriptApp.deleteTrigger(t);
+      removed++;
+    }
+  });
+  if (removed > 0) {
+    logSyncActivity('exec_trigger_remove', '', '', 'Removed ' + removed + ' trigger(s).');
+  }
+}
