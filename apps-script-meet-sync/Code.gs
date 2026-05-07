@@ -1435,6 +1435,79 @@ function generateExecutionId_(sheet) {
 }
 
 /**
+ * Create a per-task execution Google Doc inside CONFIG.EXECUTION_OUTPUT_FOLDER_ID,
+ * with the QA layout from spec §6.1: metadata table, Generated Prompt, LLM Output,
+ * Missing Info, Review Notes.
+ *
+ * Returns the Doc URL.
+ */
+function createExecutionDoc_(rowValues, classification, output, executionId) {
+  var taskId        = String(rowValues[MASTER_COLS.TASK_ID]       || '');
+  var task          = String(rowValues[MASTER_COLS.TASK]          || '');
+  var owner         = String(rowValues[MASTER_COLS.OWNER]         || '');
+  var meetingTitle  = String(rowValues[MASTER_COLS.MEETING_TITLE] || '');
+  var meetingDate   = String(rowValues[MASTER_COLS.MEETING_DATE]  || '');
+  var okrLink       = String(rowValues[MASTER_COLS.OKR_LINK]      || '');
+  var executionType = String(classification.execution_type        || '');
+  var missingInfo   = String(classification.missing_info          || '');
+  var generatedPrompt = String(classification.generated_prompt    || '');
+
+  var truncatedTask = task.length > 60 ? task.slice(0, 57) + '...' : task;
+  var datePrefix    = Utilities.formatDate(new Date(), 'UTC', 'yyyy-MM-dd');
+  var docTitle      = '[' + executionId + ' ' + datePrefix + '] ' + truncatedTask;
+
+  var doc  = DocumentApp.create(docTitle);
+  var body = doc.getBody();
+  body.clear();
+
+  // 1. Heading 1 — TaskID + task
+  body.appendParagraph(taskId + ' · ' + task).setHeading(DocumentApp.ParagraphHeading.HEADING1);
+
+  // 2. Metadata table
+  var metaTable = body.appendTable([
+    ['Task ID',       taskId],
+    ['Execution ID',  executionId],
+    ['Execution Type', executionType],
+    ['Owner',         owner],
+    ['Created At',    new Date().toISOString()],
+    ['Source meeting', (meetingTitle || '(unknown)') + ' — ' + (meetingDate || '(no date)')],
+    ['OKR link',      okrLink || '(none)']
+  ]);
+  // Bold the first column
+  for (var r = 0; r < metaTable.getNumRows(); r++) {
+    metaTable.getCell(r, 0).getChild(0).asParagraph().editAsText().setBold(true);
+  }
+
+  // 3. Generated Prompt (monospaced for QA legibility)
+  body.appendParagraph('Generated Prompt (sent to execution LLM — for QA)')
+      .setHeading(DocumentApp.ParagraphHeading.HEADING2);
+  var promptPara = body.appendParagraph(generatedPrompt || '(empty)');
+  promptPara.editAsText().setFontFamily('Roboto Mono');
+
+  // 4. LLM Output
+  body.appendParagraph('LLM Output').setHeading(DocumentApp.ParagraphHeading.HEADING2);
+  body.appendParagraph(output || '(empty)');
+
+  // 5. Missing Info
+  body.appendParagraph('Missing Info (from classification)').setHeading(DocumentApp.ParagraphHeading.HEADING2);
+  body.appendParagraph(missingInfo || 'None noted');
+
+  // 6. Review Notes (empty)
+  body.appendParagraph('Review Notes').setHeading(DocumentApp.ParagraphHeading.HEADING2);
+  body.appendParagraph(''); // intentional: reviewer fills this in
+
+  doc.saveAndClose();
+
+  // Move the Doc into the configured output folder
+  var folder = DriveApp.getFolderById(CONFIG.EXECUTION_OUTPUT_FOLDER_ID);
+  DriveApp.getFileById(doc.getId()).moveTo(folder);
+
+  var url = doc.getUrl();
+  logSyncActivity('exec_doc', taskId, doc.getName(), url);
+  return url;
+}
+
+/**
  * Entrypoint for both the menu item and the hourly time trigger.
  */
 function runExecutionWorkbench() {
