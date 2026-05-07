@@ -623,10 +623,11 @@ function parseWithHiveMind(transcriptText, meetingDate, okrContext) {
   var payload, endpoint;
   if (isResponsesApi) {
     // Responses API — /v1/responses
+    // NOTE: gpt-5 rejects `temperature` ("Unsupported parameter ... not supported with this model").
+    // Do NOT add temperature here. gpt-4o uses the Chat Completions branch below and supports it.
     endpoint = 'https://api.openai.com/v1/responses';
     payload = {
       model:        CONFIG.OPENAI_MODEL,
-      temperature:  0.2,
       instructions: systemPrompt,
       input:        'Transcript:\n\n' + transcriptText
     };
