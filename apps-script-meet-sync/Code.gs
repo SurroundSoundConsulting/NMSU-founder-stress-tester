@@ -1176,9 +1176,196 @@ function findExecutionCandidates_(sheet) {
 }
 
 /**
+ * Build the classifier system prompt. Mirrors the rubric in the design spec §6.2.
+ * The OKR list is appended last; everything else is fixed instruction text.
+ */
+function buildClassifierSystemPrompt_(okrContext) {
+  return [
+    'You are a task classifier for a founder execution workbench. Each input row is one action item from a Master Action Board fed by meeting transcripts. Your job is to decide whether an LLM should produce a deliverable for this row, what kind of deliverable, and what (if anything) is missing.',
+    '',
+    'Output JSON ONLY — no markdown fences, no commentary, no extra fields. Schema:',
+    '{',
+    '  "execution_needed": "Yes" | "No",',
+    '  "is_executable": true | false,',
+    '  "execution_type": string,           // short label: "draft email", "summary", "checklist", "doc outline", "spec", "agenda", etc. Empty string if execution_needed is No.',
+    '  "missing_info": string,             // concrete missing facts (audience, success criteria, links, definitions). Empty string when nothing concrete is missing.',
+    '  "generated_prompt": string,         // the exact prompt to send to a downstream execution LLM. Empty string if execution_needed is No or is_executable is false.',
+    '  "should_execute_now": true | false  // see HARD RULE below',
+    '}',
+    '',
+    'execution_needed = "No" when:',
+    '- The task is a pure human commitment (relationship building, decisions only the owner can make, in-person work).',
+    '- The next step is to talk to a person, attend a meeting, sign a document, or operate physical/credentialed systems.',
+    '- The task is purely administrative scheduling that does not benefit from a written deliverable.',
+    '- The task is already complete or trivially obvious (no LLM value-add).',
+    '',
+    'is_executable = false when:',
+    '- An LLM cannot produce the deliverable even with perfect context: signing, calling, paying, attending, deploying, demoing in person, anything requiring credentials or human presence.',
+    '',
+    'missing_info should list CONCRETE GAPS, not vague "needs more detail":',
+    '- Who is the audience? What is the desired tone? What is the success criterion? What URL / doc / metric is referenced? What constraints apply?',
+    '- Empty string when the task already has enough context for an LLM to produce a useful first draft.',
+    '',
+    'generated_prompt rules:',
+    '- Self-contained: assume the executor has only this prompt + the row\'s own context.',
+    '- Specify the deliverable format explicitly (e.g. "Output a 3-paragraph email in plain text").',
+    '- Include relevant constraints from the row: audience, tone, length, format.',
+    '- Reference the OKR link if the task is OKR-aligned.',
+    '- Do NOT include a JSON wrapper. Plain instruction prose.',
+    '',
+    'HARD RULE for should_execute_now:',
+    '- should_execute_now = true if and only if execution_needed == "Yes" AND is_executable == true AND missing_info == "".',
+    '- Otherwise should_execute_now = false.',
+    '',
+    'Respond with JSON only. No prose.',
+    '',
+    'OKR list for context (use okr_link from the row, do not invent):',
+    okrContext || '(no OKR list available)'
+  ].join('\n');
+}
+
+/**
+ * Build the classifier user-message input. One row's data plus its
+ * Execution Context (column R) — the place users add facts the transcript missed.
+ */
+function buildClassifierInput_(rowValues) {
+  var v = rowValues;
+  return [
+    'task_id: '          + String(v[MASTER_COLS.TASK_ID]       || ''),
+    'task: '             + String(v[MASTER_COLS.TASK]          || ''),
+    'owner: '            + String(v[MASTER_COLS.OWNER]         || ''),
+    'status: '           + String(v[MASTER_COLS.STATUS]        || ''),
+    'urgency: '          + String(v[MASTER_COLS.URGENCY]       || ''),
+    'due_date: '         + String(v[MASTER_COLS.DUE_DATE]      || ''),
+    'next_step: '        + String(v[MASTER_COLS.NEXT_STEP]     || ''),
+    'blockers: '         + String(v[MASTER_COLS.BLOCKERS]      || ''),
+    'dependencies: '     + String(v[MASTER_COLS.DEPENDENCIES]  || ''),
+    'okr_link: '         + String(v[MASTER_COLS.OKR_LINK]      || ''),
+    'risk_flag: '        + String(v[MASTER_COLS.RISK_FLAG]     || ''),
+    'meeting_title: '    + String(v[MASTER_COLS.MEETING_TITLE] || ''),
+    'meeting_date: '     + String(v[MASTER_COLS.MEETING_DATE]  || ''),
+    'execution_context: ' + String(v[EXECUTION_COLS.EXECUTION_CONTEXT] || '(none provided)')
+  ].join('\n');
+}
+
+/**
+ * Call OpenAI to classify one row. Returns the parsed JSON object on success,
+ * or throws with a descriptive message. Logs prompt sizes and raw response head.
+ *
+ * Endpoint routing matches parseWithHiveMind: gpt-5+ uses /v1/responses,
+ * gpt-4o and earlier use /v1/chat/completions.
+ */
+function classifyTask_(rowValues, okrContext) {
+  var taskId       = String(rowValues[MASTER_COLS.TASK_ID] || '(no-id)');
+  var systemPrompt = buildClassifierSystemPrompt_(okrContext);
+  var userInput    = buildClassifierInput_(rowValues);
+
+  logSyncActivity('exec_classify_prompt', taskId, '', 'system=' + systemPrompt.length + ' chars | user=' + userInput.length + ' chars');
+
+  var isResponsesApi = !CONFIG.OPENAI_MODEL.startsWith('gpt-4');
+  var endpoint, payload;
+  if (isResponsesApi) {
+    // NOTE: gpt-5 via the Responses API rejects `temperature` with HTTP 400
+    // ("Unsupported parameter: 'temperature' is not supported with this model").
+    // Do NOT add temperature here.
+    endpoint = 'https://api.openai.com/v1/responses';
+    payload = {
+      model:        CONFIG.OPENAI_MODEL,
+      instructions: systemPrompt,
+      input:        userInput
+    };
+  } else {
+    endpoint = 'https://api.openai.com/v1/chat/completions';
+    payload = {
+      model:       CONFIG.OPENAI_MODEL,
+      temperature: 0.2,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user',   content: userInput }
+      ]
+    };
+  }
+
+  var response = UrlFetchApp.fetch(endpoint, {
+    method:          'post',
+    contentType:     'application/json',
+    headers:         { 'Authorization': 'Bearer ' + CONFIG.OPENAI_API_KEY },
+    payload:         JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  var status = response.getResponseCode();
+  var body   = response.getContentText();
+  if (status < 200 || status >= 300) {
+    throw new Error('Classifier HTTP ' + status + ': ' + body.slice(0, 400));
+  }
+
+  var rawText = extractOpenAIText_(body, isResponsesApi);
+  logSyncActivity('exec_classify_raw', taskId, '', 'first 800 chars: ' + rawText.slice(0, 800));
+
+  var parsed;
+  try {
+    parsed = JSON.parse(stripCodeFences_(rawText));
+  } catch (e) {
+    throw new Error('Classifier returned non-JSON: ' + rawText.slice(0, 400));
+  }
+
+  // Coerce defensive defaults so downstream code can rely on shape.
+  parsed.execution_needed   = String(parsed.execution_needed   || 'No');
+  parsed.is_executable      = parsed.is_executable === true;
+  parsed.execution_type     = String(parsed.execution_type     || '');
+  parsed.missing_info       = String(parsed.missing_info       || '');
+  parsed.generated_prompt   = String(parsed.generated_prompt   || '');
+  parsed.should_execute_now = parsed.should_execute_now === true;
+
+  logSyncActivity('exec_classify_parsed', taskId, '',
+    'execution_needed=' + parsed.execution_needed +
+    ' | is_executable=' + parsed.is_executable +
+    ' | execution_type="' + parsed.execution_type + '"' +
+    ' | missing_info=' + (parsed.missing_info ? parsed.missing_info.length + ' chars' : 'empty') +
+    ' | generated_prompt=' + (parsed.generated_prompt ? parsed.generated_prompt.length + ' chars' : 'empty') +
+    ' | should_execute_now=' + parsed.should_execute_now);
+
+  return parsed;
+}
+
+/**
+ * Extract the assistant text from an OpenAI response body.
+ * Responses API: prefer body.output_text, fall back to body.output[0].content[0].text.
+ * Chat Completions: body.choices[0].message.content.
+ */
+function extractOpenAIText_(rawJson, isResponsesApi) {
+  var body = JSON.parse(rawJson);
+  if (isResponsesApi) {
+    if (body.output_text) return String(body.output_text);
+    if (body.output && body.output.length) {
+      var item = body.output[0];
+      if (item.content && item.content.length && item.content[0].text) {
+        return String(item.content[0].text);
+      }
+    }
+    throw new Error('Responses API: no output_text or output[].content[].text in response');
+  } else {
+    if (body.choices && body.choices.length && body.choices[0].message && body.choices[0].message.content) {
+      return String(body.choices[0].message.content);
+    }
+    throw new Error('Chat Completions: no choices[0].message.content in response');
+  }
+}
+
+/**
+ * Strip ```json ... ``` or ``` ... ``` code fences if the model added them
+ * despite the JSON-only instruction.
+ */
+function stripCodeFences_(text) {
+  return String(text)
+    .replace(/^\s*```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/, '')
+    .trim();
+}
+
+/**
  * Entrypoint for both the menu item and the hourly time trigger.
- * For now: schema check and candidate selection. Subsequent tasks add
- * classification, execution, and writeback.
  */
 function runExecutionWorkbench() {
   logSyncActivity('exec_start', '', '', 'Workbench pass starting (batch limit ' + CONFIG.EXECUTION_BATCH_LIMIT + ').');
@@ -1195,5 +1382,29 @@ function runExecutionWorkbench() {
   }).join(', ');
   logSyncActivity('exec_candidates', '', '', candidates.length + ' candidate row(s); first 5: ' + (preview || '(none)'));
 
-  logSyncActivity('exec_done', '', '', 'Workbench pass complete (candidate selection only — no LLM calls yet).');
+  if (candidates.length === 0) {
+    logSyncActivity('exec_done', '', '', 'Workbench pass complete — no candidates.');
+    return;
+  }
+
+  var okrContext = fetchOKRContext();
+
+  var classified = 0;
+  var errors     = 0;
+  candidates.forEach(function(c) {
+    var taskId = String(c.values[MASTER_COLS.TASK_ID] || '(no-id)');
+    try {
+      c.classification = classifyTask_(c.values, okrContext);
+      classified++;
+    } catch (e) {
+      errors++;
+      logSyncActivity('exec_error', taskId, '', 'classify stage: ' + e.message.slice(0, 300));
+    }
+  });
+
+  logSyncActivity('exec_done', '', '',
+    'Workbench pass complete — candidates=' + candidates.length +
+    ' | classified=' + classified +
+    ' | errors=' + errors +
+    ' (no writeback yet — Task 5 adds it).');
 }
