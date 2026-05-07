@@ -1,52 +1,62 @@
 // ============================================================
-// CONFIG — Edit these values before running the script
+// CONFIG — Hardcoded defaults + Script-Properties-backed secrets
 // ============================================================
-var CONFIG = {
-  // ID of the "Raw Meet Artifacts" Drive folder
-  // Find it in the Drive URL: drive.google.com/drive/folders/FOLDER_ID
-  INBOX_FOLDER_ID: 'REPLACE_WITH_RAW_MEET_ARTIFACTS_FOLDER_ID',
+//
+// The 4 instance-specific values below are read from Script Properties so
+// they survive code replacements. Set them once via:
+//   Apps Script editor → Project Settings → Script Properties → Add property
+//
+// Required properties:
+//   INBOX_FOLDER_ID             — Drive folder ID of "Raw Meet Artifacts"
+//   SPREADSHEET_ID              — Founder command-center Sheet ID
+//   OPENAI_API_KEY              — OpenAI API key
+//   EXECUTION_OUTPUT_FOLDER_ID  — Drive folder ID for execution output Docs
+//
+// Everything else is hardcoded below; edit in code if you need to change it.
+// Run diagnoseConfig() to verify the 4 properties are set and the IDs resolve.
 
-  // ID of the founder command-center Google Sheet (same sheet as Fireflies system)
-  // Find it in the Sheet URL: docs.google.com/spreadsheets/d/SHEET_ID/edit
-  SPREADSHEET_ID: 'REPLACE_WITH_YOUR_SPREADSHEET_ID',
+function loadConfig_() {
+  var p = PropertiesService.getScriptProperties().getProperties();
+  return {
+    // --- Script Properties (instance-specific; set once per deployment) ---
+    INBOX_FOLDER_ID:            p.INBOX_FOLDER_ID            || '',
+    SPREADSHEET_ID:             p.SPREADSHEET_ID             || '',
+    OPENAI_API_KEY:             p.OPENAI_API_KEY             || '',
+    EXECUTION_OUTPUT_FOLDER_ID: p.EXECUTION_OUTPUT_FOLDER_ID || '',
 
-  // OpenAI API key for Hive Mind analysis
-  OPENAI_API_KEY: 'REPLACE_WITH_YOUR_OPENAI_API_KEY',
+    // --- Hardcoded defaults ---
 
-  // OpenAI model for transcript analysis + OKR mapping.
-  // gpt-5 uses the new Responses API (/v1/responses); gpt-4o uses Chat Completions (/v1/chat/completions).
-  // The code auto-selects the correct endpoint and response parsing based on this value.
-  OPENAI_MODEL: 'gpt-5',
+    // OpenAI model for transcript analysis + OKR mapping.
+    // gpt-5 uses the Responses API (/v1/responses); gpt-4o uses Chat Completions.
+    // The code auto-selects the correct endpoint and response parsing based on this value.
+    OPENAI_MODEL: 'gpt-5',
 
-  // Sheet tab names — must match what exists in your spreadsheet
-  TAB_MASTER:    'Master Action Board',
-  TAB_PROCESSED: 'Processed Sources',
-  TAB_SYNC_LOG:  'Sync Log',
+    // Sheet tab names — must match what exists in your spreadsheet
+    TAB_MASTER:    'Master Action Board',
+    TAB_PROCESSED: 'Processed Sources',
+    TAB_SYNC_LOG:  'Sync Log',
 
-  // How far back to look when the 15-minute sync trigger runs (minutes)
-  LOOKBACK_MINUTES: 60,
+    // How far back to look when the 15-minute sync trigger runs (minutes)
+    LOOKBACK_MINUTES: 60,
 
-  // How many days back to scan during a one-time backfill
-  BACKFILL_DAYS: 7,
+    // How many days back to scan during a one-time backfill
+    BACKFILL_DAYS: 7,
 
-  // Title fragments that identify a doc as a Meet artifact
-  // Add your own patterns if Gemini/Meet uses different naming in your Workspace
-  MEET_TITLE_PATTERNS: ['Notes by Gemini', 'Meeting transcript', 'Meet transcript'],
+    // Title fragments that identify a doc as a Meet artifact
+    MEET_TITLE_PATTERNS: ['Notes by Gemini', 'Meeting transcript', 'Meet transcript'],
 
-  // Name of the OKR Registry sheet tab in your spreadsheet
-  // Import okr_registry.csv into this tab — see apps-script-meet-sync/okr_registry.csv
-  // Leave empty ('') to skip OKR mapping (tasks will show "Unmapped")
-  OKR_TAB_NAME: 'OKR Registry',
+    // Name of the OKR Registry sheet tab. Import okr_registry.csv into this tab.
+    // Leave empty ('') to skip OKR mapping (tasks will show "Unmapped").
+    OKR_TAB_NAME: 'OKR Registry',
 
-  // Drive folder ID where per-task execution Google Docs are created.
-  // Pre-provisioned by hand. The script's runner must have edit access to this folder.
-  EXECUTION_OUTPUT_FOLDER_ID: '1BKWfhq4b22K1ZT9jsfTo-YvEPhrW5Qsz',
+    // Max candidate rows the execution workbench processes per pass.
+    // Apps Script time triggers die at 6 min; with 2 gpt-5 calls/row at ~10–30s each,
+    // 10 rows is the safe ceiling. Excess candidates wait for the next pass.
+    EXECUTION_BATCH_LIMIT: 10
+  };
+}
 
-  // Max candidate rows the execution workbench processes per pass.
-  // Apps Script time triggers die at 6 min; with 2 gpt-5 calls/row at ~10–30s each,
-  // 10 rows is the safe ceiling. Excess candidates wait for the next pass.
-  EXECUTION_BATCH_LIMIT: 10
-};
+var CONFIG = loadConfig_();
 
 // ============================================================
 // MASTER_COLS — Column indexes for the 16-column Master Action Board
@@ -1063,6 +1073,17 @@ function backfillRecentTranscripts(daysBack) {
  */
 function diagnoseConfig() {
   var results = [];
+
+  // 0. Script Properties presence check
+  var requiredProps = ['INBOX_FOLDER_ID', 'SPREADSHEET_ID', 'OPENAI_API_KEY', 'EXECUTION_OUTPUT_FOLDER_ID'];
+  var props = PropertiesService.getScriptProperties().getProperties();
+  var missing = requiredProps.filter(function(k) { return !props[k]; });
+  if (missing.length > 0) {
+    results.push('SCRIPT_PROPERTIES: MISSING — ' + missing.join(', ') +
+      '. Set them in Apps Script editor → Project Settings → Script Properties.');
+  } else {
+    results.push('SCRIPT_PROPERTIES: OK — all 4 secrets/IDs are set.');
+  }
 
   // 1. Spreadsheet
   try {
