@@ -36,7 +36,16 @@ var CONFIG = {
   // Name of the OKR Registry sheet tab in your spreadsheet
   // Import okr_registry.csv into this tab — see apps-script-meet-sync/okr_registry.csv
   // Leave empty ('') to skip OKR mapping (tasks will show "Unmapped")
-  OKR_TAB_NAME: 'OKR Registry'
+  OKR_TAB_NAME: 'OKR Registry',
+
+  // Drive folder ID where per-task execution Google Docs are created.
+  // Pre-provisioned by hand. The script's runner must have edit access to this folder.
+  EXECUTION_OUTPUT_FOLDER_ID: '1BKWfhq4b22K1ZT9jsfTo-YvEPhrW5Qsz',
+
+  // Max candidate rows the execution workbench processes per pass.
+  // Apps Script time triggers die at 6 min; with 2 gpt-5 calls/row at ~10–30s each,
+  // 10 rows is the safe ceiling. Excess candidates wait for the next pass.
+  EXECUTION_BATCH_LIMIT: 10
 };
 
 // ============================================================
@@ -60,6 +69,46 @@ var MASTER_COLS = {
   MEETING_DATE: 13,  // N
   CREATED_AT:   14,  // O
   UPDATED_AT:   15   // P
+};
+
+// ============================================================
+// EXECUTION_COLS — Column indexes for the 10 workbench columns
+// appended to Master Action Board after MASTER_COLS (Q-Z).
+// Existing 16-col reads are unaffected; workbench reads use sheet.getLastColumn().
+// ============================================================
+var EXECUTION_COLS = {
+  EXECUTION_NEEDED:        16,  // Q
+  EXECUTION_CONTEXT:       17,  // R — user-edited
+  EXECUTION_TYPE:          18,  // S
+  MISSING_INFO:            19,  // T
+  EXECUTION_STATUS:        20,  // U
+  EXECUTION_STATUS_REASON: 21,  // V
+  LATEST_EXECUTION_ID:     22,  // W
+  EXECUTION_OUTPUT_LINK:   23,  // X
+  LAST_EXECUTED_AT:        24,  // Y
+  FORCE_RERUN:             25   // Z — user-edited
+};
+
+var EXECUTION_HEADERS = [
+  'Execution Needed',
+  'Execution Context',
+  'Execution Type',
+  'Missing Info',
+  'Execution Status',
+  'Execution Status Reason',
+  'Latest Execution ID',
+  'Execution Output Link',
+  'Last Executed At',
+  'Force Re-run'
+];
+
+// Exact strings used in the Execution Status column. Filters and
+// downstream tools depend on these — do not vary the casing or wording.
+var EXEC_STATUS = {
+  MISSING_INFO:        'Missing Info',
+  READY_FOR_EXECUTION: 'Ready for Execution',
+  NOT_AUTOMATABLE:     'Not Automatable',
+  READY_FOR_REVIEW:    'Ready for Review'
 };
 
 // ============================================================
