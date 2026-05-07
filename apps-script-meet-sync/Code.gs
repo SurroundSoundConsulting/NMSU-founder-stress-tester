@@ -1107,3 +1107,53 @@ function diagnoseConfig() {
     logSyncActivity('diagnose', '', '', r);
   });
 }
+
+// ============================================================
+// EXECUTION WORKBENCH — Stage 3: Per-task LLM execution
+// Spec: docs/superpowers/specs/2026-05-07-execution-workbench-design.md
+// ============================================================
+
+/**
+ * Idempotent. Ensures the 10 workbench headers exist in columns Q–Z of
+ * Master Action Board. Adds any that are missing without touching Q–Z values
+ * in existing data rows. Logs which columns (if any) were added.
+ */
+function ensureExecutionColumns_(sheet) {
+  var lastCol = sheet.getLastColumn();
+  var existingHeaders = lastCol > 0
+    ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h) { return String(h || ''); })
+    : [];
+
+  var added = [];
+  EXECUTION_HEADERS.forEach(function(header, i) {
+    var targetCol = 17 + i; // 1-based: Q=17, R=18, ..., Z=26
+    var current   = existingHeaders[targetCol - 1] || '';
+    if (current !== header) {
+      sheet.getRange(1, targetCol).setValue(header);
+      added.push(header);
+    }
+  });
+
+  if (added.length > 0) {
+    logSyncActivity('exec_schema', '', '', 'Added ' + added.length + ' header(s): ' + added.join(', '));
+  } else {
+    logSyncActivity('exec_schema', '', '', 'All 10 workbench headers already present (no-op).');
+  }
+}
+
+/**
+ * Entrypoint for both the menu item and the hourly time trigger.
+ * For now: schema check only. Subsequent tasks add candidate selection,
+ * classification, execution, and writeback.
+ */
+function runExecutionWorkbench() {
+  logSyncActivity('exec_start', '', '', 'Workbench pass starting (batch limit ' + CONFIG.EXECUTION_BATCH_LIMIT + ').');
+
+  var ss    = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+  var sheet = ss.getSheetByName(CONFIG.TAB_MASTER);
+  if (!sheet) throw new Error('Tab "' + CONFIG.TAB_MASTER + '" not found in spreadsheet');
+
+  ensureExecutionColumns_(sheet);
+
+  logSyncActivity('exec_done', '', '', 'Workbench pass complete (schema check only — no rows processed yet).');
+}
