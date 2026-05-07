@@ -1365,6 +1365,51 @@ function stripCodeFences_(text) {
 }
 
 /**
+ * Map a classification result to (status, statusReason) per spec §5.1.
+ * - Missing Info wins over Not Automatable when both could apply.
+ * - Distinguishes the two Not Automatable reasons exactly.
+ */
+function classificationToStatus_(c) {
+  if (c.execution_needed === 'No') {
+    return { status: EXEC_STATUS.NOT_AUTOMATABLE, reason: 'Automation not selected by model' };
+  }
+  if (c.is_executable === false) {
+    return { status: EXEC_STATUS.NOT_AUTOMATABLE, reason: 'Task not suitable for an LLM' };
+  }
+  if (c.missing_info && c.missing_info.length > 0) {
+    return { status: EXEC_STATUS.MISSING_INFO, reason: 'Classifier reported gaps; see Missing Info column' };
+  }
+  if (!c.generated_prompt) {
+    return { status: EXEC_STATUS.MISSING_INFO, reason: 'Classifier did not produce a generated_prompt' };
+  }
+  return { status: EXEC_STATUS.READY_FOR_EXECUTION, reason: '' };
+}
+
+/**
+ * Write the 5 classification columns to a single row.
+ * Columns Q, S, T, U, V. Leaves R (user-edited Execution Context) and
+ * W/X/Y/Z (executor + user) untouched.
+ */
+function writeClassificationToRow_(sheet, rowNum, c, statusInfo) {
+  // Q (17): Execution Needed
+  sheet.getRange(rowNum, EXECUTION_COLS.EXECUTION_NEEDED + 1).setValue(c.execution_needed);
+  // S (19): Execution Type
+  sheet.getRange(rowNum, EXECUTION_COLS.EXECUTION_TYPE + 1).setValue(c.execution_type);
+  // T (20): Missing Info
+  sheet.getRange(rowNum, EXECUTION_COLS.MISSING_INFO + 1).setValue(c.missing_info);
+  // U (21): Execution Status
+  sheet.getRange(rowNum, EXECUTION_COLS.EXECUTION_STATUS + 1).setValue(statusInfo.status);
+  // V (22): Execution Status Reason
+  sheet.getRange(rowNum, EXECUTION_COLS.EXECUTION_STATUS_REASON + 1).setValue(statusInfo.reason);
+
+  logSyncActivity('exec_writeback', String(c.__taskId || ''), '',
+    'row ' + rowNum +
+    ' | status=' + statusInfo.status +
+    ' | reason=' + (statusInfo.reason || '(empty)') +
+    ' | execution_type=' + c.execution_type);
+}
+
+/**
  * Entrypoint for both the menu item and the hourly time trigger.
  */
 function runExecutionWorkbench() {
@@ -1390,12 +1435,24 @@ function runExecutionWorkbench() {
   var okrContext = fetchOKRContext();
 
   var classified = 0;
-  var errors     = 0;
+  var missingInfo = 0;
+  var notAutomatable = 0;
+  var readyForExecution = 0;
+  var errors = 0;
+
   candidates.forEach(function(c) {
     var taskId = String(c.values[MASTER_COLS.TASK_ID] || '(no-id)');
     try {
-      c.classification = classifyTask_(c.values, okrContext);
+      var classification = classifyTask_(c.values, okrContext);
+      classification.__taskId = taskId; // for writeback log only
+      var statusInfo = classificationToStatus_(classification);
+      writeClassificationToRow_(sheet, c.rowNum, classification, statusInfo);
+      c.classification = classification;
+      c.statusInfo     = statusInfo;
       classified++;
+      if (statusInfo.status === EXEC_STATUS.MISSING_INFO)        missingInfo++;
+      if (statusInfo.status === EXEC_STATUS.NOT_AUTOMATABLE)     notAutomatable++;
+      if (statusInfo.status === EXEC_STATUS.READY_FOR_EXECUTION) readyForExecution++;
     } catch (e) {
       errors++;
       logSyncActivity('exec_error', taskId, '', 'classify stage: ' + e.message.slice(0, 300));
@@ -1405,6 +1462,9 @@ function runExecutionWorkbench() {
   logSyncActivity('exec_done', '', '',
     'Workbench pass complete — candidates=' + candidates.length +
     ' | classified=' + classified +
+    ' | missing_info=' + missingInfo +
+    ' | not_automatable=' + notAutomatable +
+    ' | ready_for_execution=' + readyForExecution +
     ' | errors=' + errors +
-    ' (no writeback yet — Task 5 adds it).');
+    ' (executor wired in Task 8).');
 }
