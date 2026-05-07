@@ -1615,64 +1615,72 @@ function passesExecuteGate_(c) {
  * Entrypoint for both the menu item and the hourly time trigger.
  */
 function runExecutionWorkbench() {
-  logSyncActivity('exec_start', '', '', 'Workbench pass starting (batch limit ' + CONFIG.EXECUTION_BATCH_LIMIT + ').');
-
-  var ss    = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
-  var sheet = ss.getSheetByName(CONFIG.TAB_MASTER);
-  if (!sheet) throw new Error('Tab "' + CONFIG.TAB_MASTER + '" not found in spreadsheet');
-
-  ensureExecutionColumns_(sheet);
-
-  var candidates = findExecutionCandidates_(sheet);
-  var preview    = candidates.slice(0, 5).map(function(c) {
-    return String(c.values[MASTER_COLS.TASK_ID] || '(no id)') + ' (row ' + c.rowNum + ')';
-  }).join(', ');
-  logSyncActivity('exec_candidates', '', '', candidates.length + ' candidate row(s); first 5: ' + (preview || '(none)'));
-
-  if (candidates.length === 0) {
-    logSyncActivity('exec_done', '', '', 'Workbench pass complete — no candidates.');
+  var lock = LockService.getDocumentLock();
+  if (!lock.tryLock(0)) {
+    logSyncActivity('exec_skipped', '', '', 'Another workbench pass is already running — skipped.');
     return;
   }
 
-  var okrContext = fetchOKRContext();
+  try {
+    logSyncActivity('exec_start', '', '', 'Workbench pass starting (batch limit ' + CONFIG.EXECUTION_BATCH_LIMIT + ').');
 
-  // Phase 1: classify all candidates (write Q/S/T/U/V).
-  var classified = 0;
-  var classifyErrors = 0;
-  candidates.forEach(function(c) {
-    var taskId = String(c.values[MASTER_COLS.TASK_ID] || '(no-id)');
-    try {
-      var classification = classifyTask_(c.values, okrContext);
-      classification.__taskId = taskId;
-      var statusInfo = classificationToStatus_(classification);
-      writeClassificationToRow_(sheet, c.rowNum, classification, statusInfo);
-      c.classification = classification;
-      c.statusInfo     = statusInfo;
-      classified++;
-    } catch (e) {
-      classifyErrors++;
-      logSyncActivity('exec_error', taskId, '', 'classify stage: ' + e.message.slice(0, 300));
+    var ss    = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+    var sheet = ss.getSheetByName(CONFIG.TAB_MASTER);
+    if (!sheet) throw new Error('Tab "' + CONFIG.TAB_MASTER + '" not found in spreadsheet');
+
+    ensureExecutionColumns_(sheet);
+
+    var candidates = findExecutionCandidates_(sheet);
+    var preview    = candidates.slice(0, 5).map(function(c) {
+      return String(c.values[MASTER_COLS.TASK_ID] || '(no id)') + ' (row ' + c.rowNum + ')';
+    }).join(', ');
+    logSyncActivity('exec_candidates', '', '', candidates.length + ' candidate row(s); first 5: ' + (preview || '(none)'));
+
+    if (candidates.length === 0) {
+      logSyncActivity('exec_done', '', '', 'Workbench pass complete — no candidates.');
+      return;
     }
-  });
 
-  // Phase 2: run executor on rows that pass the gate (write W/X/Y, set Ready for Review).
-  var executed = 0;
-  var executeErrors = 0;
-  candidates.forEach(function(c) {
-    if (!c.classification) return; // classify failed
-    var taskId = String(c.values[MASTER_COLS.TASK_ID] || '(no-id)');
-    var pass   = passesExecuteGate_(c.classification);
-    logSyncActivity('exec_gate', taskId, '', pass ? 'PASS — executing' : 'SKIP — gate not met');
-    if (!pass) return;
+    var okrContext = fetchOKRContext();
 
-    var ok = executeAndWriteback_(sheet, c);
-    if (ok) executed++; else executeErrors++;
-  });
+    var classified = 0;
+    var classifyErrors = 0;
+    candidates.forEach(function(c) {
+      var taskId = String(c.values[MASTER_COLS.TASK_ID] || '(no-id)');
+      try {
+        var classification = classifyTask_(c.values, okrContext);
+        classification.__taskId = taskId;
+        var statusInfo = classificationToStatus_(classification);
+        writeClassificationToRow_(sheet, c.rowNum, classification, statusInfo);
+        c.classification = classification;
+        c.statusInfo     = statusInfo;
+        classified++;
+      } catch (e) {
+        classifyErrors++;
+        logSyncActivity('exec_error', taskId, '', 'classify stage: ' + e.message.slice(0, 300));
+      }
+    });
 
-  logSyncActivity('exec_done', '', '',
-    'Workbench pass complete — candidates=' + candidates.length +
-    ' | classified=' + classified +
-    ' | executed=' + executed +
-    ' | classify_errors=' + classifyErrors +
-    ' | execute_errors=' + executeErrors);
+    var executed = 0;
+    var executeErrors = 0;
+    candidates.forEach(function(c) {
+      if (!c.classification) return;
+      var taskId = String(c.values[MASTER_COLS.TASK_ID] || '(no-id)');
+      var pass   = passesExecuteGate_(c.classification);
+      logSyncActivity('exec_gate', taskId, '', pass ? 'PASS — executing' : 'SKIP — gate not met');
+      if (!pass) return;
+
+      var ok = executeAndWriteback_(sheet, c);
+      if (ok) executed++; else executeErrors++;
+    });
+
+    logSyncActivity('exec_done', '', '',
+      'Workbench pass complete — candidates=' + candidates.length +
+      ' | classified=' + classified +
+      ' | executed=' + executed +
+      ' | classify_errors=' + classifyErrors +
+      ' | execute_errors=' + executeErrors);
+  } finally {
+    lock.releaseLock();
+  }
 }
