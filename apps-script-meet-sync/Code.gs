@@ -1562,6 +1562,56 @@ function executeTask_(generatedPrompt, taskId) {
 }
 
 /**
+ * For one row that passed the gate: run the executor, create the Doc, write
+ * the executor columns (W/X/Y), set status = Ready for Review, clear Force Re-run.
+ *
+ * On executor or Doc failure: leaves status = Ready for Execution, writes the
+ * truncated error to Execution Status Reason. Row will retry next pass.
+ */
+function executeAndWriteback_(sheet, candidate) {
+  var rowNum = candidate.rowNum;
+  var c      = candidate.classification;
+  var taskId = String(candidate.values[MASTER_COLS.TASK_ID] || '(no-id)');
+
+  try {
+    var output      = executeTask_(c.generated_prompt, taskId);
+    var executionId = generateExecutionId_(sheet);
+    var docUrl      = createExecutionDoc_(candidate.values, c, output, executionId);
+    var nowIso      = new Date().toISOString();
+
+    sheet.getRange(rowNum, EXECUTION_COLS.LATEST_EXECUTION_ID + 1).setValue(executionId);
+    sheet.getRange(rowNum, EXECUTION_COLS.EXECUTION_OUTPUT_LINK + 1).setValue(docUrl);
+    sheet.getRange(rowNum, EXECUTION_COLS.LAST_EXECUTED_AT + 1).setValue(nowIso);
+    sheet.getRange(rowNum, EXECUTION_COLS.EXECUTION_STATUS + 1).setValue(EXEC_STATUS.READY_FOR_REVIEW);
+    sheet.getRange(rowNum, EXECUTION_COLS.EXECUTION_STATUS_REASON + 1).setValue('');
+    sheet.getRange(rowNum, EXECUTION_COLS.FORCE_RERUN + 1).setValue('No');
+
+    logSyncActivity('exec_writeback', taskId, '',
+      'row ' + rowNum +
+      ' | status=' + EXEC_STATUS.READY_FOR_REVIEW +
+      ' | execution_id=' + executionId +
+      ' | doc=' + docUrl);
+    return true;
+  } catch (e) {
+    var msg = e.message ? e.message.slice(0, 300) : String(e);
+    sheet.getRange(rowNum, EXECUTION_COLS.EXECUTION_STATUS_REASON + 1).setValue('Executor error: ' + msg);
+    logSyncActivity('exec_error', taskId, '', 'execute stage: ' + msg);
+    return false;
+  }
+}
+
+/**
+ * Apply the execute gate per spec §5.2 and log the decision.
+ */
+function passesExecuteGate_(c) {
+  return c.execution_needed === 'Yes'
+      && c.is_executable === true
+      && (!c.missing_info || c.missing_info.length === 0)
+      && c.generated_prompt
+      && c.generated_prompt.length > 0;
+}
+
+/**
  * Entrypoint for both the menu item and the hourly time trigger.
  */
 function runExecutionWorkbench() {
@@ -1586,37 +1636,43 @@ function runExecutionWorkbench() {
 
   var okrContext = fetchOKRContext();
 
+  // Phase 1: classify all candidates (write Q/S/T/U/V).
   var classified = 0;
-  var missingInfo = 0;
-  var notAutomatable = 0;
-  var readyForExecution = 0;
-  var errors = 0;
-
+  var classifyErrors = 0;
   candidates.forEach(function(c) {
     var taskId = String(c.values[MASTER_COLS.TASK_ID] || '(no-id)');
     try {
       var classification = classifyTask_(c.values, okrContext);
-      classification.__taskId = taskId; // for writeback log only
+      classification.__taskId = taskId;
       var statusInfo = classificationToStatus_(classification);
       writeClassificationToRow_(sheet, c.rowNum, classification, statusInfo);
       c.classification = classification;
       c.statusInfo     = statusInfo;
       classified++;
-      if (statusInfo.status === EXEC_STATUS.MISSING_INFO)        missingInfo++;
-      if (statusInfo.status === EXEC_STATUS.NOT_AUTOMATABLE)     notAutomatable++;
-      if (statusInfo.status === EXEC_STATUS.READY_FOR_EXECUTION) readyForExecution++;
     } catch (e) {
-      errors++;
+      classifyErrors++;
       logSyncActivity('exec_error', taskId, '', 'classify stage: ' + e.message.slice(0, 300));
     }
+  });
+
+  // Phase 2: run executor on rows that pass the gate (write W/X/Y, set Ready for Review).
+  var executed = 0;
+  var executeErrors = 0;
+  candidates.forEach(function(c) {
+    if (!c.classification) return; // classify failed
+    var taskId = String(c.values[MASTER_COLS.TASK_ID] || '(no-id)');
+    var pass   = passesExecuteGate_(c.classification);
+    logSyncActivity('exec_gate', taskId, '', pass ? 'PASS — executing' : 'SKIP — gate not met');
+    if (!pass) return;
+
+    var ok = executeAndWriteback_(sheet, c);
+    if (ok) executed++; else executeErrors++;
   });
 
   logSyncActivity('exec_done', '', '',
     'Workbench pass complete — candidates=' + candidates.length +
     ' | classified=' + classified +
-    ' | missing_info=' + missingInfo +
-    ' | not_automatable=' + notAutomatable +
-    ' | ready_for_execution=' + readyForExecution +
-    ' | errors=' + errors +
-    ' (executor wired in Task 8).');
+    ' | executed=' + executed +
+    ' | classify_errors=' + classifyErrors +
+    ' | execute_errors=' + executeErrors);
 }
