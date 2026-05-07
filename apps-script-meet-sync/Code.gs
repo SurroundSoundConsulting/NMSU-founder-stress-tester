@@ -1142,8 +1142,42 @@ function ensureExecutionColumns_(sheet) {
 }
 
 /**
+ * Read Master Action Board and return up to EXECUTION_BATCH_LIMIT candidate
+ * rows for this pass. A row is a candidate iff:
+ *   - status (col D) != 'done' (case-insensitive, trimmed)
+ *   - AND (Execution Output Link empty OR Force Re-run == 'Yes')
+ *
+ * Returns: array of { rowNum, values } objects.
+ *   rowNum is 1-based sheet row (header is 1, data starts at 2).
+ *   values is the full row array, length >= 26.
+ */
+function findExecutionCandidates_(sheet) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  var width = sheet.getLastColumn();
+  var rows  = sheet.getRange(2, 1, lastRow - 1, width).getValues();
+
+  var candidates = [];
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var status     = String(r[MASTER_COLS.STATUS] || '').trim().toLowerCase();
+    var outputLink = String(r[EXECUTION_COLS.EXECUTION_OUTPUT_LINK] || '').trim();
+    var forceRerun = String(r[EXECUTION_COLS.FORCE_RERUN] || '').trim().toLowerCase();
+
+    if (status === 'done') continue;
+    if (outputLink && forceRerun !== 'yes') continue;
+
+    candidates.push({ rowNum: i + 2, values: r });
+    if (candidates.length >= CONFIG.EXECUTION_BATCH_LIMIT) break;
+  }
+
+  return candidates;
+}
+
+/**
  * Entrypoint for both the menu item and the hourly time trigger.
- * For now: schema check only. Subsequent tasks add candidate selection,
+ * For now: schema check and candidate selection. Subsequent tasks add
  * classification, execution, and writeback.
  */
 function runExecutionWorkbench() {
@@ -1155,5 +1189,11 @@ function runExecutionWorkbench() {
 
   ensureExecutionColumns_(sheet);
 
-  logSyncActivity('exec_done', '', '', 'Workbench pass complete (schema check only — no rows processed yet).');
+  var candidates = findExecutionCandidates_(sheet);
+  var preview    = candidates.slice(0, 5).map(function(c) {
+    return String(c.values[MASTER_COLS.TASK_ID] || '(no id)') + ' (row ' + c.rowNum + ')';
+  }).join(', ');
+  logSyncActivity('exec_candidates', '', '', candidates.length + ' candidate row(s); first 5: ' + (preview || '(none)'));
+
+  logSyncActivity('exec_done', '', '', 'Workbench pass complete (candidate selection only — no LLM calls yet).');
 }
