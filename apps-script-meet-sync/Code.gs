@@ -1636,7 +1636,9 @@ function passesExecuteGate_(c) {
  * Entrypoint for both the menu item and the hourly time trigger.
  */
 function runExecutionWorkbench() {
-  var lock = LockService.getDocumentLock();
+  // getScriptLock works for both standalone and container-bound scripts;
+  // getDocumentLock returns null in standalone projects.
+  var lock = LockService.getScriptLock();
   if (!lock.tryLock(0)) {
     logSyncActivity('exec_skipped', '', '', 'Another workbench pass is already running — skipped.');
     return;
