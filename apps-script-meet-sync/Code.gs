@@ -1291,9 +1291,13 @@ function classifyTask_(rowValues, okrContext) {
     // Do NOT add temperature here.
     endpoint = 'https://api.openai.com/v1/responses';
     payload = {
-      model:        CONFIG.OPENAI_MODEL,
-      instructions: systemPrompt,
-      input:        userInput
+      model:             CONFIG.OPENAI_MODEL,
+      instructions:      systemPrompt,
+      input:             userInput,
+      // Classification is small structured JSON — minimize reasoning so the
+      // model doesn't burn its token budget on hidden CoT and starve the message.
+      reasoning:         { effort: 'low' },
+      max_output_tokens: 4000
     };
   } else {
     endpoint = 'https://api.openai.com/v1/chat/completions';
@@ -1359,13 +1363,26 @@ function extractOpenAIText_(rawJson, isResponsesApi) {
   var body = JSON.parse(rawJson);
   if (isResponsesApi) {
     if (body.output_text) return String(body.output_text);
+    // gpt-5 (reasoning model) returns output[] as a sequence: typically a
+    // {type:"reasoning"} item first, then a {type:"message"} item with the text.
+    // Scan all items to find the first one that carries content[].text.
     if (body.output && body.output.length) {
-      var item = body.output[0];
-      if (item.content && item.content.length && item.content[0].text) {
-        return String(item.content[0].text);
+      for (var i = 0; i < body.output.length; i++) {
+        var item = body.output[i];
+        if (item && item.content && item.content.length) {
+          for (var j = 0; j < item.content.length; j++) {
+            var part = item.content[j];
+            if (part && part.text) return String(part.text);
+          }
+        }
       }
     }
-    throw new Error('Responses API: no output_text or output[].content[].text in response');
+    // Include status + truncated raw body so the failure is diagnosable from logs.
+    var status = body.status ? ' status=' + body.status : '';
+    var incomplete = (body.incomplete_details && body.incomplete_details.reason)
+      ? ' incomplete=' + body.incomplete_details.reason : '';
+    throw new Error('Responses API: no output_text or output[].content[].text in response.' +
+      status + incomplete + ' raw(0..600)=' + rawJson.slice(0, 600));
   } else {
     if (body.choices && body.choices.length && body.choices[0].message && body.choices[0].message.content) {
       return String(body.choices[0].message.content);
@@ -1546,9 +1563,14 @@ function executeTask_(generatedPrompt, taskId) {
     // gpt-5 Responses API rejects `temperature` (HTTP 400). Do NOT add it.
     endpoint = 'https://api.openai.com/v1/responses';
     payload = {
-      model:        CONFIG.OPENAI_MODEL,
-      instructions: systemPrompt,
-      input:        generatedPrompt
+      model:             CONFIG.OPENAI_MODEL,
+      instructions:      systemPrompt,
+      input:             generatedPrompt,
+      // Executor produces a finished deliverable (email/draft/brief). Low
+      // reasoning effort keeps latency/cost down; the higher token cap lets
+      // longer deliverables (multi-paragraph emails, briefs) complete.
+      reasoning:         { effort: 'low' },
+      max_output_tokens: 18000
     };
   } else {
     endpoint = 'https://api.openai.com/v1/chat/completions';
