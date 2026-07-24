@@ -52,7 +52,19 @@ function loadConfig_() {
     // Max candidate rows the execution workbench processes per pass.
     // Apps Script time triggers die at 6 min; with 2 gpt-5 calls/row at ~10–30s each,
     // 10 rows is the safe ceiling. Excess candidates wait for the next pass.
-    EXECUTION_BATCH_LIMIT: 10
+    EXECUTION_BATCH_LIMIT: 10,
+
+    // Max inbox Docs processInbox() will chew through in one pass.
+    // Each Doc = 1 OpenAI call (~10–30s) + Sheet reads/writes. Apps Script
+    // time-based triggers die at 30 min. Keep this well under the ceiling
+    // so a growing backlog doesn't cause hourly timeout emails — the next
+    // trigger picks up what's left.
+    INBOX_BATCH_LIMIT: 5,
+
+    // Soft wall-clock budget for processInbox() in ms. If we've been running
+    // longer than this at the top of a loop iteration, we log a partial and
+    // return cleanly. Set below the 30-min hard limit with headroom.
+    INBOX_MAX_RUN_MS: 22 * 60 * 1000
   };
 }
 
@@ -912,11 +924,27 @@ function getAllTabsText(fileId) {
  * Safe to run multiple times — already-processed files are skipped.
  */
 function processInbox() {
+  var startMs     = Date.now();
   var inboxFolder = DriveApp.getFolderById(CONFIG.INBOX_FOLDER_ID);
   var files       = inboxFolder.getFiles();
   var processed   = 0;
+  var seen        = 0;
+  var stopReason  = 'inbox_empty';
 
-  logSyncActivity('process_start', '', '', 'Scanning inbox for unprocessed docs...');
+  logSyncActivity('process_start', '', '', 'Scanning inbox (batch limit=' + CONFIG.INBOX_BATCH_LIMIT + ', budget=' + Math.round(CONFIG.INBOX_MAX_RUN_MS/1000) + 's)');
+
+  // Prefetch processed file IDs into a Set ONCE. Previously we called
+  // isProcessedStatus() on every iteration, which re-read the whole
+  // Processed Sources sheet each time — O(N × M) and a major cause of
+  // 30-min timeouts once Processed Sources grew past a few hundred rows.
+  var processedSet = {};
+  var procRows = getProcessedSourcesRows();
+  for (var pi = 0; pi < procRows.length; pi++) {
+    if (String(procRows[pi][8]) === 'processed') {
+      processedSet[String(procRows[pi][1])] = true;
+    }
+  }
+  logSyncActivity('process_prefetch', '', '', 'Loaded ' + procRows.length + ' Processed Sources rows into idempotency set.');
 
   // Fetch OKR context once for the whole run (avoids one Doc open per file)
   var okrContext = fetchOKRContext();
@@ -927,9 +955,22 @@ function processInbox() {
   }
 
   while (files.hasNext()) {
+    // Per-run cap: bail once we've processed the batch limit; next trigger
+    // picks up what's left. Keeps a growing backlog from bricking every run.
+    if (processed >= CONFIG.INBOX_BATCH_LIMIT) {
+      stopReason = 'batch_limit_reached';
+      break;
+    }
+    // Time budget: if we're close to the 30-min hard limit, stop cleanly.
+    if (Date.now() - startMs > CONFIG.INBOX_MAX_RUN_MS) {
+      stopReason = 'time_budget_reached';
+      break;
+    }
+
     var file     = files.next();
     var fileId   = file.getId();
     var fileName = file.getName();
+    seen++;
 
     // Only handle Google Docs
     if (file.getMimeType() !== 'application/vnd.google-apps.document') continue;
@@ -937,8 +978,9 @@ function processInbox() {
     // Idempotency: skip if already fully processed.
     // NOTE: We check by the COPY's file ID (inbox file ID), not the source ID.
     // The copy ID is logged into Processed Sources at the end of this loop.
-    if (isProcessedStatus(fileId, 'processed')) {
-      logSyncActivity('skip', fileId, fileName, 'Status = processed — skipped');
+    if (processedSet[fileId]) {
+      // Intentionally NOT logging every skip — with a large processed set,
+      // logging N skips per run swamped the Sync Log. Silent skip.
       continue;
     }
 
@@ -985,6 +1027,7 @@ function processInbox() {
       // (We use logProcessedSource rather than updateProcessedStatus because the copy ID
       // was never added to Processed Sources — only the source ID was, during Stage 1.)
       logProcessedSource('', fileId, meetingTitle, sourceType, meetingDate, meetingTitle, 'processed');
+      processedSet[fileId] = true; // keep in-memory set in sync so we don't reprocess if we loop again
       processed++;
 
     } catch (e) {
@@ -992,7 +1035,11 @@ function processInbox() {
     }
   }
 
-  logSyncActivity('process_done', '', '', 'Processing complete. ' + processed + ' file(s) processed.');
+  var elapsedSec = Math.round((Date.now() - startMs) / 1000);
+  logSyncActivity('process_done', '', '',
+    'Processed ' + processed + ' file(s) in ' + elapsedSec + 's ' +
+    '(saw ' + seen + ', stopped=' + stopReason + '). ' +
+    'Next trigger continues if more remain.');
 }
 
 // ============================================================
