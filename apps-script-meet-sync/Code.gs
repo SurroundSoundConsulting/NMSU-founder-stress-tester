@@ -1192,6 +1192,141 @@ function diagnoseConfig() {
   });
 }
 
+/**
+ * diagnoseEnvironment() — Answers "which environment am I actually wired to?"
+ *
+ * Read-only. Prints to the execution log ONLY (does not write to Sync Log, so
+ * it's safe to run against either environment without leaving a trace).
+ *
+ * Resolves every configured ID to a human-readable name and shows the Drive
+ * folder path, so a prod/staging cross-wire is visible at a glance. Also
+ * detects the CONFIG-shadowing failure mode by comparing the effective CONFIG
+ * against raw Script Properties.
+ *
+ * Run this BEFORE moving any files between environments.
+ */
+function diagnoseEnvironment() {
+  var out = [];
+  function say(s) { out.push(s); Logger.log(s); }
+
+  // ── 1. Shadowing check: raw Script Properties vs effective CONFIG ────────
+  var props = PropertiesService.getScriptProperties().getProperties();
+  say('=== CONFIG SOURCE ===');
+  ['INBOX_FOLDER_ID', 'SPREADSHEET_ID', 'EXECUTION_OUTPUT_FOLDER_ID'].forEach(function(k) {
+    var fromProps = props[k] || '(unset)';
+    var effective = CONFIG[k] || '(undefined)';
+    var flag = (fromProps === effective) ? 'match' : '*** MISMATCH — CONFIG IS SHADOWED ***';
+    say(k + ':\n    ScriptProperty = ' + fromProps + '\n    effective      = ' + effective + '\n    ' + flag);
+  });
+  var keyProp = props.OPENAI_API_KEY || '';
+  var keyEff  = CONFIG.OPENAI_API_KEY || '';
+  say('OPENAI_API_KEY: ScriptProperty ' + (keyProp ? 'set (len ' + keyProp.length + ')' : 'UNSET') +
+      ' | effective ' + (keyEff ? 'set (len ' + keyEff.length + ')' : 'UNSET') +
+      (keyProp === keyEff ? ' | match' : ' | *** MISMATCH — CONFIG IS SHADOWED ***'));
+  say('OPENAI_MODEL (effective): ' + CONFIG.OPENAI_MODEL);
+  say('INBOX_BATCH_LIMIT (effective): ' + CONFIG.INBOX_BATCH_LIMIT +
+      (typeof CONFIG.INBOX_BATCH_LIMIT === 'number' ? '' : '  *** undefined => CONFIG IS SHADOWED ***'));
+
+  // ── 2. Inbox folder: name, full path, count, newest file ─────────────────
+  say('');
+  say('=== INBOX FOLDER (' + CONFIG.INBOX_FOLDER_ID + ') ===');
+  try {
+    var folder = DriveApp.getFolderById(CONFIG.INBOX_FOLDER_ID);
+    // Walk parents to build the full path — this is what reveals
+    // "Hive Mind Inbox" vs "Hive Mind Inbox - STAGING".
+    var path = folder.getName();
+    var p = folder.getParents();
+    while (p.hasNext()) { var par = p.next(); path = par.getName() + ' / ' + path; p = par.getParents(); }
+    say('path: ' + path);
+
+    var count = 0, newest = null, newestName = '';
+    var it = folder.getFiles();
+    while (it.hasNext()) {
+      var f = it.next();
+      count++;
+      var u = f.getLastUpdated();
+      if (!newest || u > newest) { newest = u; newestName = f.getName(); }
+    }
+    say('file count: ' + count);
+    say('newest file: ' + (newestName || '(none)') +
+        (newest ? '  [updated ' + Utilities.formatDate(newest, 'UTC', 'yyyy-MM-dd') + ']' : ''));
+  } catch (e) {
+    say('ERROR: ' + e.message);
+  }
+
+  // ── 3. Spreadsheet: name, board size, newest meeting_date ───────────────
+  say('');
+  say('=== SPREADSHEET (' + CONFIG.SPREADSHEET_ID + ') ===');
+  try {
+    var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+    say('name: ' + ss.getName());
+    var mb = ss.getSheetByName(CONFIG.TAB_MASTER);
+    if (!mb) {
+      say('Master Action Board: NOT FOUND');
+    } else {
+      var lastRow = mb.getLastRow();
+      say('Master Action Board rows (excl. header): ' + Math.max(0, lastRow - 1));
+      if (lastRow > 1) {
+        // Newest meeting_date tells us whether this board received the
+        // July artifacts or stopped in May.
+        var dates = mb.getRange(2, MASTER_COLS.MEETING_DATE + 1, lastRow - 1, 1).getValues();
+        var maxDate = '';
+        for (var i = 0; i < dates.length; i++) {
+          var d = String(dates[i][0] || '');
+          if (d && d > maxDate) maxDate = d;
+        }
+        say('newest meeting_date on board: ' + (maxDate || '(none parseable)'));
+      }
+    }
+    var ps = ss.getSheetByName(CONFIG.TAB_PROCESSED);
+    say('Processed Sources rows: ' + (ps ? Math.max(0, ps.getLastRow() - 1) : 'TAB NOT FOUND'));
+  } catch (e) {
+    say('ERROR: ' + e.message);
+  }
+
+  // ── 4. Cross-wire detection ─────────────────────────────────────────────
+  // Sample Processed Sources file IDs and check which folder each actually
+  // lives in. If they resolve to a folder other than the configured inbox,
+  // this sheet was fed by a different environment.
+  say('');
+  say('=== CROSS-WIRE CHECK (sampling 10 Processed Sources file IDs) ===');
+  try {
+    var rows = getProcessedSourcesRows();
+    var checked = 0, sameFolder = 0, otherFolder = {}, gone = 0;
+    for (var r = rows.length - 1; r >= 0 && checked < 10; r--) {
+      var fid = String(rows[r][1] || '');
+      if (!fid) continue;
+      checked++;
+      try {
+        var pf = DriveApp.getFileById(fid).getParents();
+        var names = [];
+        while (pf.hasNext()) names.push(pf.next().getId());
+        if (names.indexOf(CONFIG.INBOX_FOLDER_ID) !== -1) sameFolder++;
+        else names.forEach(function(n) { otherFolder[n] = (otherFolder[n] || 0) + 1; });
+      } catch (e2) { gone++; }
+    }
+    say('sampled: ' + checked + ' | in configured inbox: ' + sameFolder +
+        ' | inaccessible/trashed: ' + gone);
+    var keys = Object.keys(otherFolder);
+    if (keys.length === 0) {
+      say('no foreign parent folders detected');
+    } else {
+      say('*** files parented in OTHER folders — likely cross-wire: ***');
+      keys.forEach(function(k) {
+        var nm = k;
+        try { nm = DriveApp.getFolderById(k).getName(); } catch (e3) {}
+        say('    ' + nm + '  (' + k + ')  x' + otherFolder[k]);
+      });
+    }
+  } catch (e) {
+    say('ERROR: ' + e.message);
+  }
+
+  say('');
+  say('=== DONE — copy this whole log ===');
+  return out.join('\n');
+}
+
 // ============================================================
 // EXECUTION WORKBENCH — Stage 3: Per-task LLM execution
 // Spec: docs/superpowers/specs/2026-05-07-execution-workbench-design.md
