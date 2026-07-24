@@ -451,8 +451,13 @@ function discoverFromCalendar(from, to) {
  */
 function discoverFromDrive(from) {
   var results = [];
-  // Drive search requires ISO date without the time component
+  // NOTE: this drops the time component, so the effective window is
+  // "since midnight UTC on that date", not LOOKBACK_MINUTES. Deliberately
+  // left broad — re-discovery is cheap because Processed Sources dedupes,
+  // whereas a too-narrow window silently misses artifacts.
   var fromDateStr = Utilities.formatDate(from, 'UTC', 'yyyy-MM-dd');
+
+  var skippedCopies = 0;
 
   CONFIG.MEET_TITLE_PATTERNS.forEach(function(pattern) {
     var query = [
@@ -466,13 +471,34 @@ function discoverFromDrive(from) {
       var files = DriveApp.searchFiles(query);
       while (files.hasNext()) {
         var file = files.next();
-        var sourceType = classifyDoc(file.getName()) || 'unknown_meet_doc';
+        var name = file.getName();
+
+        // Never re-ingest one of our own inbox copies as if it were a source.
+        //
+        // The 'not <inbox> in parents' clause above only excludes the ONE
+        // configured inbox. Copies living anywhere else — a second
+        // environment's inbox (e.g. "Hive Mind Inbox - STAGING"), a manual
+        // backup, a "Copy of ..." duplicate — still match the title patterns,
+        // get treated as fresh sources, and are re-copied with another
+        // "[HM date]" prefix. That produced names like
+        // "[HM 2026-07-24] [HM 2026-07-24] Notes by Gemini" and grew the
+        // inbox on every 15-minute sync.
+        //
+        // The "[HM YYYY-MM-DD]" token is written only by copyToInbox, so its
+        // presence anywhere in the name reliably identifies a copy regardless
+        // of which folder it sits in.
+        if (/\[HM \d{4}-\d{2}-\d{2}\]/.test(name)) {
+          skippedCopies++;
+          continue;
+        }
+
+        var sourceType = classifyDoc(name) || 'unknown_meet_doc';
         results.push({
           eventId:      '',
           fileId:       file.getId(),
-          fileName:     file.getName(),
+          fileName:     name,
           meetingDate:  Utilities.formatDate(file.getLastUpdated(), 'UTC', 'yyyy-MM-dd'),
-          meetingTitle: file.getName(),
+          meetingTitle: name,
           sourceType:   sourceType
         });
       }
@@ -481,6 +507,12 @@ function discoverFromDrive(from) {
       logSyncActivity('drive_search_error', '', '', 'Pattern "' + pattern + '" failed: ' + e.message);
     }
   });
+
+  if (skippedCopies > 0) {
+    logSyncActivity('drive_scan_skip_copies', '', '',
+      'Ignored ' + skippedCopies + ' file(s) already carrying an "[HM date]" prefix ' +
+      '(existing inbox copies in other folders — not re-ingested as sources).');
+  }
 
   return results;
 }
@@ -679,7 +711,15 @@ function parseWithHiveMind(transcriptText, meetingDate, okrContext) {
     payload = {
       model:        CONFIG.OPENAI_MODEL,
       instructions: systemPrompt,
-      input:        'Transcript:\n\n' + transcriptText
+      input:        'Transcript:\n\n' + transcriptText,
+      // Transcripts run 20k–90k chars on top of a ~38k-char system prompt.
+      // Without an explicit cap, gpt-5 can spend its whole budget on hidden
+      // reasoning and return an incomplete response with no message item.
+      // Low effort is sufficient — this is structured extraction, not
+      // open-ended reasoning — and 32k output leaves room for transcripts
+      // that yield many action items.
+      reasoning:         { effort: 'low' },
+      max_output_tokens: 32000
     };
   } else {
     // Chat Completions API — /v1/chat/completions (gpt-4o and earlier)
@@ -707,16 +747,20 @@ function parseWithHiveMind(transcriptText, meetingDate, okrContext) {
     throw new Error('OpenAI ' + code + ': ' + response.getContentText().slice(0, 300));
   }
 
-  var body    = JSON.parse(response.getContentText());
-  var content = isResponsesApi
-    ? body.output_text
-    : body.choices[0].message.content;
+  // Use the shared extractor rather than reading body.output_text directly.
+  // gpt-5 does not reliably populate output_text over raw HTTP — the text
+  // arrives as a {type:"message"} item in output[], usually preceded by a
+  // {type:"reasoning"} item. Reading output_text yielded undefined, and the
+  // logging line below then threw "Cannot read properties of undefined
+  // (reading 'length')". extractOpenAIText_ scans output[] and raises a
+  // diagnosable error (status + incomplete_details + raw prefix) instead.
+  var content = extractOpenAIText_(response.getContentText(), isResponsesApi);
 
   // Log raw response so we can see exactly what GPT returned for okr_link
   logSyncActivity('openai_raw', '', '', 'Raw response (' + content.length + ' chars): ' + content.slice(0, 800).replace(/\n/g, ' '));
 
   // Strip accidental markdown code fences
-  content = content.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
+  content = stripCodeFences_(content);
 
   var parsed = JSON.parse(content);
 
