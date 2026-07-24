@@ -185,6 +185,21 @@ function parseTitleFromInboxName(fileName) {
   return s.replace(/^(?:Copy of\s+)+/i, '').trim();
 }
 
+/**
+ * True when a filename carries two or more "[HM YYYY-MM-DD]" tokens, e.g.
+ * "[HM 2026-07-24] [HM 2026-07-24] Notes by Gemini".
+ *
+ * These are copies-of-copies produced by the copy loop that existed before
+ * discoverFromDrive() learned to skip already-stamped files: the scanner saw a
+ * stamped inbox copy in another environment's folder, matched it against
+ * MEET_TITLE_PATTERNS, and re-copied it with a fresh stamp. They contain no new
+ * meeting content and must never reach the board.
+ */
+function isDoubleStampedName_(fileName) {
+  var m = String(fileName || '').match(/\[HM \d{4}-\d{2}-\d{2}\]/g);
+  return !!m && m.length > 1;
+}
+
 // ============================================================
 // OKR CONTEXT — Fetched once per processInbox() run
 // ============================================================
@@ -1017,6 +1032,7 @@ function processInbox(daysBackOrEvent) {
   var nonDoc      = 0;
   var tooOld      = 0;
   var undated     = 0;
+  var doubleStamp = 0;
   var stopReason  = 'inbox_exhausted';
 
   // Fail loudly if CONFIG is being shadowed by a stray CONFIG.gs file in the
@@ -1075,6 +1091,13 @@ function processInbox(daysBackOrEvent) {
     var fid = f.getId();
     if (processedSet[fid]) { skipped++; continue; }
 
+    // Artifacts of the pre-fix copy loop: "[HM date] [HM date] Title". These are
+    // copies-of-copies, not meetings. Their leading token is the copy date (often
+    // today), so they'd otherwise look like the freshest files in the folder and
+    // consume the whole batch. Never process them; cleanupDoubleStampedCopies()
+    // removes them.
+    if (isDoubleStampedName_(f.getName())) { doubleStamp++; continue; }
+
     // Meeting date comes from the "[HM YYYY-MM-DD] Title" copy filename.
     // We deliberately do NOT fall back to file.getLastUpdated() for the age
     // check: files copied between environments have a fresh lastUpdated, so
@@ -1101,7 +1124,8 @@ function processInbox(daysBackOrEvent) {
   logSyncActivity('process_candidates', '', '',
     'Eligible: ' + candidates.length + ' of ' + seen + ' file(s) seen. ' +
     'Excluded — already processed: ' + skipped + ', outside window: ' + tooOld +
-    ', undated: ' + undated + ', non-Doc: ' + nonDoc + '. ' +
+    ', undated: ' + undated + ', non-Doc: ' + nonDoc +
+    ', double-stamped copies: ' + doubleStamp + '. ' +
     'Processing up to ' + CONFIG.INBOX_BATCH_LIMIT + ' newest-first.');
 
   // Fetch OKR context once for the whole run (avoids one Doc open per file)
@@ -1369,6 +1393,65 @@ function folderPath_(folder) {
     p = par.getParents();
   }
   return path;
+}
+
+/**
+ * Remove the double-stamped copies-of-copies left behind by the pre-fix copy
+ * loop (see isDoubleStampedName_).
+ *
+ * DRY RUN BY DEFAULT — logs what it would trash and changes nothing. Call
+ * cleanupDoubleStampedCopiesForReal() to actually move them to Drive trash
+ * (recoverable for 30 days; nothing is permanently deleted).
+ *
+ * Only files whose names carry two or more [HM date] tokens are touched, so
+ * legitimate single-stamped inbox copies and their source transcripts are never
+ * at risk. Safe to re-run.
+ */
+function cleanupDoubleStampedCopies(commit) {
+  var doIt   = (commit === true);
+  var folder = DriveApp.getFolderById(CONFIG.INBOX_FOLDER_ID);
+  var out    = [];
+  function say(s) { out.push(s); Logger.log(s); }
+
+  say(doIt ? '=== CLEANUP: TRASHING double-stamped copies ==='
+           : '=== CLEANUP: DRY RUN (nothing will be changed) ===');
+  say('Folder: ' + folderPath_(folder));
+
+  var it = folder.getFiles();
+  var seen = 0, hits = 0, failed = 0;
+  while (it.hasNext()) {
+    var f = it.next();
+    seen++;
+    if (!isDoubleStampedName_(f.getName())) continue;
+    hits++;
+    if (hits <= 40) say((doIt ? 'TRASH  ' : 'WOULD TRASH  ') + f.getName());
+    if (doIt) {
+      try {
+        f.setTrashed(true);
+      } catch (e) {
+        failed++;
+        say('  FAILED: ' + e.message);
+      }
+    }
+  }
+  if (hits > 40) say('... and ' + (hits - 40) + ' more.');
+
+  say('Scanned ' + seen + ' file(s); ' + hits + ' double-stamped.');
+  if (doIt) {
+    say('Trashed ' + (hits - failed) + ', failed ' + failed + '.');
+  } else if (hits > 0) {
+    say('Run cleanupDoubleStampedCopiesForReal() to trash these.');
+  }
+
+  logSyncActivity('cleanup_double_stamped', '', '',
+    (doIt ? 'Trashed ' : 'Dry run — found ') + hits + ' double-stamped copy/copies of ' + seen + ' scanned.');
+
+  return out.join('\n');
+}
+
+/** Wrapper: actually trash the double-stamped copies. See cleanupDoubleStampedCopies(). */
+function cleanupDoubleStampedCopiesForReal() {
+  return cleanupDoubleStampedCopies(true);
 }
 
 function diagnoseEnvironment() {
@@ -2163,6 +2246,9 @@ function onOpen() {
     .addItem('Process inbox (last ' + CONFIG.PROCESS_LOOKBACK_DAYS + ' days)', 'processInbox')
     .addItem('Process inbox — custom window…', 'promptProcessInboxSince')
     .addItem('Process inbox — ALL dates (slow)', 'confirmProcessInboxAll')
+    .addSeparator()
+    .addItem('Find double-stamped copies (dry run)', 'cleanupDoubleStampedCopies')
+    .addItem('Trash double-stamped copies', 'cleanupDoubleStampedCopiesForReal')
     .addSeparator()
     .addItem('Diagnose environment (prod vs staging)', 'diagnoseEnvironment')
     .addItem('Diagnose config', 'diagnoseConfig')
