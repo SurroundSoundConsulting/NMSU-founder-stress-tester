@@ -1376,16 +1376,47 @@ function diagnoseEnvironment() {
     say('ERROR: ' + e.message);
   }
 
-  // ── 4. Cross-wire detection ─────────────────────────────────────────────
-  // Sample Processed Sources file IDs and check which folder each actually
-  // lives in. If they resolve to a folder other than the configured inbox,
-  // this sheet was fed by a different environment.
+  // ── 4. Processed Sources status breakdown + cross-wire detection ─────────
+  // IMPORTANT: Processed Sources holds two different kinds of ID in column B.
+  //   status='copied'    → the SOURCE Doc ID, which lives wherever Meet put it
+  //                        (typically "Meet Recordings"). Foreign parent is
+  //                        expected and correct — do NOT flag it.
+  //   status='processed' → the INBOX COPY ID, which must live in the
+  //                        configured inbox folder.
+  // Only 'processed' rows are meaningful for cross-wire detection.
   say('');
-  say('=== CROSS-WIRE CHECK (sampling 10 Processed Sources file IDs) ===');
+  say('=== PROCESSED SOURCES BREAKDOWN ===');
   try {
     var rows = getProcessedSourcesRows();
-    var checked = 0, sameFolder = 0, otherFolder = {}, gone = 0;
+    var byStatus = {};
+    for (var s = 0; s < rows.length; s++) {
+      var st = String(rows[s][8] || '(blank)');
+      byStatus[st] = (byStatus[st] || 0) + 1;
+    }
+    Object.keys(byStatus).forEach(function(k) { say('status "' + k + '": ' + byStatus[k] + ' row(s)'); });
+
+    // Warn about the state that silently blocks all processing: files marked
+    // processed while the board has no corresponding task rows.
+    var processedCount = byStatus['processed'] || 0;
+    if (processedCount > 0) {
+      try {
+        var ss3 = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
+        var mb3 = ss3.getSheetByName(CONFIG.TAB_MASTER);
+        var boardRows = mb3 ? Math.max(0, mb3.getLastRow() - 1) : 0;
+        if (boardRows < processedCount / 10) {
+          say('*** WARNING: ' + processedCount + " files marked 'processed' but only " +
+              boardRows + ' row(s) on the board. Those files will be SKIPPED as ' +
+              'already-done, so the board cannot repopulate. If you cleared the ' +
+              'board, you must also clear Processed Sources. ***');
+        }
+      } catch (e4) {}
+    }
+
+    say('');
+    say('=== CROSS-WIRE CHECK (up to 10 rows with status=processed) ===');
+    var checked = 0, sameFolder = 0, otherFolder = {}, gone = 0, noParent = 0;
     for (var r = rows.length - 1; r >= 0 && checked < 10; r--) {
+      if (String(rows[r][8]) !== 'processed') continue; // only copy IDs
       var fid = String(rows[r][1] || '');
       if (!fid) continue;
       checked++;
@@ -1393,22 +1424,27 @@ function diagnoseEnvironment() {
         var pf = DriveApp.getFileById(fid).getParents();
         var names = [];
         while (pf.hasNext()) names.push(pf.next().getId());
-        if (names.indexOf(CONFIG.INBOX_FOLDER_ID) !== -1) sameFolder++;
+        if (names.length === 0) noParent++;
+        else if (names.indexOf(CONFIG.INBOX_FOLDER_ID) !== -1) sameFolder++;
         else names.forEach(function(n) { otherFolder[n] = (otherFolder[n] || 0) + 1; });
       } catch (e2) { gone++; }
     }
-    say('sampled: ' + checked + ' | in configured inbox: ' + sameFolder +
-        ' | inaccessible/trashed: ' + gone);
-    var keys = Object.keys(otherFolder);
-    if (keys.length === 0) {
-      say('no foreign parent folders detected');
+    if (checked === 0) {
+      say("no rows with status='processed' to check");
     } else {
-      say('*** files parented in OTHER folders — likely cross-wire: ***');
-      keys.forEach(function(k) {
-        var nm = k;
-        try { nm = DriveApp.getFolderById(k).getName(); } catch (e3) {}
-        say('    ' + nm + '  (' + k + ')  x' + otherFolder[k]);
-      });
+      say('sampled: ' + checked + ' | in configured inbox: ' + sameFolder +
+          ' | no visible parent: ' + noParent + ' | inaccessible/trashed: ' + gone);
+      var keys = Object.keys(otherFolder);
+      if (keys.length === 0) {
+        say('no foreign parent folders detected');
+      } else {
+        say('*** processed copies parented OUTSIDE the configured inbox — cross-wire: ***');
+        keys.forEach(function(k) {
+          var nm = k;
+          try { nm = DriveApp.getFolderById(k).getName(); } catch (e3) {}
+          say('    ' + nm + '  (' + k + ')  x' + otherFolder[k]);
+        });
+      }
     }
   } catch (e) {
     say('ERROR: ' + e.message);
