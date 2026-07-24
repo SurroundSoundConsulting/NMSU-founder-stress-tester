@@ -150,25 +150,39 @@ var EXEC_STATUS = {
 // ============================================================
 // INBOX FILENAME HELPERS
 // The copy name format we write is: "[HM YYYY-MM-DD] Original Title"
-// These helpers extract meeting date and clean title from that prefix.
+// These helpers extract meeting date and clean title from that token.
+//
+// The "[HM ...]" token is deliberately NOT anchored to the start of the
+// filename. When files are copied between Drive folders, Google prepends
+// "Copy of " — e.g. "Copy of [HM 2026-05-09] Nguyen / Rod re: ...". An
+// anchored match returned an empty date for every one of those files, which
+// made processInbox treat them as unknown-age and exclude them from the
+// default lookback window. Matching the token anywhere in the name keeps
+// copied and re-copied files working.
 // ============================================================
 
 /**
  * Extract the meeting date from an inbox copy filename.
- * Expects format: "[HM YYYY-MM-DD] ..."
+ * Finds the "[HM YYYY-MM-DD]" token anywhere in the name, so filenames
+ * carrying Drive's "Copy of " prefix still resolve.
  * Returns YYYY-MM-DD or empty string if not found.
  */
 function parseDateFromInboxName(fileName) {
-  var m = String(fileName || '').match(/^\[HM (\d{4}-\d{2}-\d{2})\]/);
+  var m = String(fileName || '').match(/\[HM (\d{4}-\d{2}-\d{2})\]/);
   return m ? m[1] : '';
 }
 
 /**
- * Strip the "[HM YYYY-MM-DD] " prefix from an inbox copy filename.
- * Returns the original meeting title.
+ * Return the original meeting title from an inbox copy filename by removing
+ * everything up to and including the "[HM YYYY-MM-DD]" token. This also drops
+ * any "Copy of " (or "Copy of Copy of ") prefix Drive added.
+ * Falls back to stripping a bare leading "Copy of " when no token is present.
  */
 function parseTitleFromInboxName(fileName) {
-  return String(fileName || '').replace(/^\[HM \d{4}-\d{2}-\d{2}\]\s*/, '');
+  var s = String(fileName || '');
+  var m = s.match(/\[HM \d{4}-\d{2}-\d{2}\]\s*([\s\S]*)$/);
+  if (m) return m[1].trim();
+  return s.replace(/^(?:Copy of\s+)+/i, '').trim();
 }
 
 // ============================================================
