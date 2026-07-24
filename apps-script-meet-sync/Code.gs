@@ -1297,6 +1297,22 @@ function diagnoseConfig() {
  *
  * Run this BEFORE moving any files between environments.
  */
+/**
+ * Build a human-readable Drive path for a folder by walking its parents.
+ * This is what makes "Hive Mind Inbox" vs "Hive Mind Inbox - STAGING"
+ * unambiguous when only the folder ID is configured.
+ */
+function folderPath_(folder) {
+  var path = folder.getName();
+  var p = folder.getParents();
+  while (p.hasNext()) {
+    var par = p.next();
+    path = par.getName() + ' / ' + path;
+    p = par.getParents();
+  }
+  return path;
+}
+
 function diagnoseEnvironment() {
   var out = [];
   function say(s) { out.push(s); Logger.log(s); }
@@ -1324,12 +1340,7 @@ function diagnoseEnvironment() {
   say('=== INBOX FOLDER (' + CONFIG.INBOX_FOLDER_ID + ') ===');
   try {
     var folder = DriveApp.getFolderById(CONFIG.INBOX_FOLDER_ID);
-    // Walk parents to build the full path — this is what reveals
-    // "Hive Mind Inbox" vs "Hive Mind Inbox - STAGING".
-    var path = folder.getName();
-    var p = folder.getParents();
-    while (p.hasNext()) { var par = p.next(); path = par.getName() + ' / ' + path; p = par.getParents(); }
-    say('path: ' + path);
+    say('path: ' + folderPath_(folder));
 
     var count = 0, newest = null, newestName = '';
     var it = folder.getFiles();
@@ -1342,6 +1353,23 @@ function diagnoseEnvironment() {
     say('file count: ' + count);
     say('newest file: ' + (newestName || '(none)') +
         (newest ? '  [updated ' + Utilities.formatDate(newest, 'UTC', 'yyyy-MM-dd') + ']' : ''));
+  } catch (e) {
+    say('ERROR: ' + e.message);
+  }
+
+  // ── 2b. Execution output folder — must match the same environment ────────
+  say('');
+  say('=== EXECUTION OUTPUT FOLDER (' + CONFIG.EXECUTION_OUTPUT_FOLDER_ID + ') ===');
+  try {
+    if (!CONFIG.EXECUTION_OUTPUT_FOLDER_ID) {
+      say('UNSET — workbench Doc creation will fail.');
+    } else {
+      var of = DriveApp.getFolderById(CONFIG.EXECUTION_OUTPUT_FOLDER_ID);
+      say('path: ' + folderPath_(of));
+      var oc = 0, oit = of.getFiles();
+      while (oit.hasNext()) { oit.next(); oc++; }
+      say('existing execution Docs: ' + oc);
+    }
   } catch (e) {
     say('ERROR: ' + e.message);
   }
