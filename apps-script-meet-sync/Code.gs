@@ -64,7 +64,21 @@ function loadConfig_() {
     // Soft wall-clock budget for processInbox() in ms. If we've been running
     // longer than this at the top of a loop iteration, we log a partial and
     // return cleanly. Set below the 30-min hard limit with headroom.
-    INBOX_MAX_RUN_MS: 22 * 60 * 1000
+    INBOX_MAX_RUN_MS: 22 * 60 * 1000,
+
+    // Default lookback window for processInbox(), in days. Only meetings dated
+    // on/after (today - this) are eligible. The inbox holds hundreds of
+    // archived transcripts whose action items are long stale; processing them
+    // wastes OpenAI spend and floods the board.
+    //
+    // Age is read from the "[HM YYYY-MM-DD]" filename prefix, NOT the Drive
+    // modified time — files copied between environments have a fresh modified
+    // time and would all look new.
+    //
+    // Overrides:
+    //   processInboxSince(90)  — custom window, run manually
+    //   processInboxAll()      — no filter at all, run manually
+    PROCESS_LOOKBACK_DAYS: 14
   };
 }
 
@@ -923,29 +937,56 @@ function getAllTabsText(fileId) {
  * and writes structured rows into the Master Action Board.
  * Safe to run multiple times — already-processed files are skipped.
  */
-function processInbox() {
+function processInbox(daysBackOrEvent) {
+  // Apps Script passes a trigger EVENT OBJECT as the first argument when this
+  // runs from a time-based trigger. Only treat the arg as a lookback override
+  // when it's actually a number, otherwise fall back to the CONFIG default.
+  // `null` is the explicit "no date filter" sentinel used by processInboxAll().
+  var lookbackDays;
+  if (typeof daysBackOrEvent === 'number' && daysBackOrEvent > 0) {
+    lookbackDays = daysBackOrEvent;
+  } else if (daysBackOrEvent === null) {
+    lookbackDays = null; // no filter
+  } else {
+    lookbackDays = CONFIG.PROCESS_LOOKBACK_DAYS;
+  }
+
   var startMs     = Date.now();
   var inboxFolder = DriveApp.getFolderById(CONFIG.INBOX_FOLDER_ID);
-  var files       = inboxFolder.getFiles();
   var processed   = 0;
   var seen        = 0;
   var skipped     = 0;
   var nonDoc      = 0;
+  var tooOld      = 0;
+  var undated     = 0;
   var stopReason  = 'inbox_exhausted';
 
   // Fail loudly if CONFIG is being shadowed by a stray CONFIG.gs file in the
   // project. Apps Script concatenates all .gs files into one global scope, so a
   // second `var CONFIG` declaration silently overwrites loadConfig_()'s. That
   // produced `batch limit=undefined, budget=NaNs` and disabled both guards.
-  if (typeof CONFIG.INBOX_BATCH_LIMIT !== 'number' || typeof CONFIG.INBOX_MAX_RUN_MS !== 'number') {
-    var msg = 'CONFIG is missing INBOX_BATCH_LIMIT/INBOX_MAX_RUN_MS. A stray ' +
-              'CONFIG.gs is almost certainly shadowing loadConfig_(). Delete ' +
-              'CONFIG.gs (and any CODE_*.gs duplicates) from the Apps Script project.';
+  if (typeof CONFIG.INBOX_BATCH_LIMIT !== 'number' ||
+      typeof CONFIG.INBOX_MAX_RUN_MS !== 'number' ||
+      typeof CONFIG.PROCESS_LOOKBACK_DAYS !== 'number') {
+    var msg = 'CONFIG is missing INBOX_BATCH_LIMIT / INBOX_MAX_RUN_MS / ' +
+              'PROCESS_LOOKBACK_DAYS. A stray CONFIG.gs is almost certainly ' +
+              'shadowing loadConfig_(). Delete CONFIG.gs (and any CODE_*.gs ' +
+              'duplicates) from the Apps Script project.';
     logSyncActivity('config_error', '', '', msg);
     throw new Error(msg);
   }
 
-  logSyncActivity('process_start', '', '', 'Scanning inbox (batch limit=' + CONFIG.INBOX_BATCH_LIMIT + ', budget=' + Math.round(CONFIG.INBOX_MAX_RUN_MS/1000) + 's)');
+  // Cutoff date as YYYY-MM-DD for lexical comparison against meeting dates.
+  var cutoff = '';
+  if (lookbackDays !== null) {
+    cutoff = Utilities.formatDate(
+      new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000), 'UTC', 'yyyy-MM-dd');
+  }
+
+  logSyncActivity('process_start', '', '',
+    'Scanning inbox (batch limit=' + CONFIG.INBOX_BATCH_LIMIT +
+    ', budget=' + Math.round(CONFIG.INBOX_MAX_RUN_MS / 1000) + 's' +
+    ', window=' + (cutoff ? 'meetings on/after ' + cutoff + ' (' + lookbackDays + "d)" : 'ALL DATES — no filter') + ')');
 
   // Prefetch processed file IDs into a Set ONCE. Previously we called
   // isProcessedStatus() on every iteration, which re-read the whole
@@ -960,6 +1001,51 @@ function processInbox() {
   }
   logSyncActivity('process_prefetch', '', '', 'Loaded ' + procRows.length + ' Processed Sources rows into idempotency set.');
 
+  // ── PHASE 1: enumerate and filter (metadata only — no Doc reads, no LLM) ──
+  // Cheap pass over the whole folder so we can sort newest-first before
+  // spending the expensive per-file budget. With hundreds of archived
+  // transcripts, processing in Drive's arbitrary order would burn the batch
+  // on random old meetings.
+  var candidates = [];
+  var it = inboxFolder.getFiles();
+  while (it.hasNext()) {
+    var f = it.next();
+    seen++;
+
+    if (f.getMimeType() !== 'application/vnd.google-apps.document') { nonDoc++; continue; }
+
+    var fid = f.getId();
+    if (processedSet[fid]) { skipped++; continue; }
+
+    // Meeting date comes from the "[HM YYYY-MM-DD] Title" copy filename.
+    // We deliberately do NOT fall back to file.getLastUpdated() for the age
+    // check: files copied between environments have a fresh lastUpdated, so
+    // that fallback would treat every archived transcript as brand new.
+    var nameDate = parseDateFromInboxName(f.getName());
+
+    if (cutoff) {
+      if (!nameDate) {
+        // Can't establish age — exclude from windowed runs rather than
+        // silently pulling in unknown-age docs. processInboxAll() picks
+        // these up (it passes no cutoff).
+        undated++;
+        continue;
+      }
+      if (nameDate < cutoff) { tooOld++; continue; }
+    }
+
+    candidates.push({ file: f, fileId: fid, fileName: f.getName(), nameDate: nameDate });
+  }
+
+  // Newest meetings first; undated (only possible when no cutoff) sort last.
+  candidates.sort(function(a, b) { return (b.nameDate || '').localeCompare(a.nameDate || ''); });
+
+  logSyncActivity('process_candidates', '', '',
+    'Eligible: ' + candidates.length + ' of ' + seen + ' file(s) seen. ' +
+    'Excluded — already processed: ' + skipped + ', outside window: ' + tooOld +
+    ', undated: ' + undated + ', non-Doc: ' + nonDoc + '. ' +
+    'Processing up to ' + CONFIG.INBOX_BATCH_LIMIT + ' newest-first.');
+
   // Fetch OKR context once for the whole run (avoids one Doc open per file)
   var okrContext = fetchOKRContext();
   if (okrContext) {
@@ -968,36 +1054,14 @@ function processInbox() {
     logSyncActivity('okr_context_empty', '', '', 'fetchOKRContext() returned empty — OKR tab "' + CONFIG.OKR_TAB_NAME + '" missing or has no active rows. All tasks will be Unmapped.');
   }
 
-  while (files.hasNext()) {
-    // Per-run cap: bail once we've processed the batch limit; next trigger
-    // picks up what's left. Keeps a growing backlog from bricking every run.
-    if (processed >= CONFIG.INBOX_BATCH_LIMIT) {
-      stopReason = 'batch_limit_reached';
-      break;
-    }
-    // Time budget: if we're close to the 30-min hard limit, stop cleanly.
-    if (Date.now() - startMs > CONFIG.INBOX_MAX_RUN_MS) {
-      stopReason = 'time_budget_reached';
-      break;
-    }
+  // ── PHASE 2: process the batch (expensive — Doc read + LLM per file) ─────
+  for (var ci = 0; ci < candidates.length; ci++) {
+    if (processed >= CONFIG.INBOX_BATCH_LIMIT) { stopReason = 'batch_limit_reached'; break; }
+    if (Date.now() - startMs > CONFIG.INBOX_MAX_RUN_MS) { stopReason = 'time_budget_reached'; break; }
 
-    var file     = files.next();
-    var fileId   = file.getId();
-    var fileName = file.getName();
-    seen++;
-
-    // Only handle Google Docs
-    if (file.getMimeType() !== 'application/vnd.google-apps.document') { nonDoc++; continue; }
-
-    // Idempotency: skip if already fully processed.
-    // NOTE: We check by the COPY's file ID (inbox file ID), not the source ID.
-    // The copy ID is logged into Processed Sources at the end of this loop.
-    if (processedSet[fileId]) {
-      // Intentionally NOT logging every skip — with a large processed set,
-      // logging N skips per run swamped the Sync Log. Silent skip.
-      skipped++;
-      continue;
-    }
+    var file     = candidates[ci].file;
+    var fileId   = candidates[ci].fileId;
+    var fileName = candidates[ci].fileName;
 
     try {
       var text;
@@ -1051,11 +1115,39 @@ function processInbox() {
   }
 
   var elapsedSec = Math.round((Date.now() - startMs) / 1000);
-  var remaining  = files.hasNext() ? 'yes' : 'no';
+  var leftover   = Math.max(0, candidates.length - processed);
   logSyncActivity('process_done', '', '',
-    'Processed ' + processed + ' new file(s) in ' + elapsedSec + 's. ' +
-    'Inbox scan: ' + seen + ' seen, ' + skipped + ' already processed, ' +
-    nonDoc + ' non-Doc. Stopped=' + stopReason + '. More files left in inbox: ' + remaining + '.');
+    'Processed ' + processed + ' file(s) in ' + elapsedSec + 's. ' +
+    'Stopped=' + stopReason + '. ' +
+    'Eligible remaining in window: ' + leftover + ' (next run continues). ' +
+    'Outside ' + (cutoff ? lookbackDays + '-day window: ' + tooOld : 'window: 0') +
+    ', undated: ' + undated + '. ' +
+    'Use processInboxAll() to include everything, or processInboxSince(N) for a custom window.');
+}
+
+/**
+ * Process the inbox with NO date filter — every unprocessed Doc is eligible,
+ * including archived transcripts and any whose filename lacks the
+ * "[HM YYYY-MM-DD]" prefix.
+ *
+ * Still honors INBOX_BATCH_LIMIT and the time budget, so with a large archive
+ * you'll need to run it repeatedly (or temporarily raise INBOX_BATCH_LIMIT).
+ * Run manually from the IDE — do NOT attach this to a trigger.
+ */
+function processInboxAll() {
+  return processInbox(null);
+}
+
+/**
+ * Process the inbox using a custom lookback window in days.
+ * Example: processInboxSince(90) — meetings from the last 90 days.
+ * Run manually from the IDE.
+ */
+function processInboxSince(days) {
+  if (typeof days !== 'number' || days <= 0) {
+    throw new Error('processInboxSince(days): pass a positive number, e.g. processInboxSince(30)');
+  }
+  return processInbox(days);
 }
 
 // ============================================================
@@ -1937,12 +2029,65 @@ function runExecutionWorkbench() {
  * full auth when clicked.
  */
 function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('Execution Workbench')
+  var ui = SpreadsheetApp.getUi();
+
+  ui.createMenu('Execution Workbench')
     .addItem('Run execution workbench', 'runExecutionWorkbench')
     .addItem('Install / refresh hourly trigger', 'setupExecutionTrigger_')
     .addItem('Remove hourly trigger', 'removeExecutionTrigger_')
     .addToUi();
+
+  ui.createMenu('Hive Mind Sync')
+    .addItem('Process inbox (last ' + CONFIG.PROCESS_LOOKBACK_DAYS + ' days)', 'processInbox')
+    .addItem('Process inbox — custom window…', 'promptProcessInboxSince')
+    .addItem('Process inbox — ALL dates (slow)', 'confirmProcessInboxAll')
+    .addSeparator()
+    .addItem('Diagnose environment (prod vs staging)', 'diagnoseEnvironment')
+    .addItem('Diagnose config', 'diagnoseConfig')
+    .addToUi();
+}
+
+/**
+ * Menu handler: ask for a lookback window, then run processInbox with it.
+ */
+function promptProcessInboxSince() {
+  var ui = SpreadsheetApp.getUi();
+  var resp = ui.prompt(
+    'Process inbox — custom window',
+    'How many days back? (meetings dated on/after today minus N)\n\n' +
+    'Default is ' + CONFIG.PROCESS_LOOKBACK_DAYS + '. Larger windows cost more ' +
+    'OpenAI spend and take longer.',
+    ui.ButtonSet.OK_CANCEL);
+
+  if (resp.getSelectedButton() !== ui.Button.OK) return;
+
+  var days = parseInt(resp.getResponseText(), 10);
+  if (isNaN(days) || days <= 0) {
+    ui.alert('Not a valid number of days — nothing ran.');
+    return;
+  }
+  processInbox(days);
+  ui.alert('Done. See the Sync Log tab for the process_done summary.');
+}
+
+/**
+ * Menu handler: confirm before running with no date filter, since this can
+ * process hundreds of archived transcripts across many runs.
+ */
+function confirmProcessInboxAll() {
+  var ui = SpreadsheetApp.getUi();
+  var resp = ui.alert(
+    'Process ALL dates?',
+    'This ignores the ' + CONFIG.PROCESS_LOOKBACK_DAYS + '-day window and makes every ' +
+    'unprocessed transcript eligible, including archived ones and any without a ' +
+    '"[HM YYYY-MM-DD]" filename prefix.\n\n' +
+    'It still processes only ' + CONFIG.INBOX_BATCH_LIMIT + ' per run, so you may need ' +
+    'to run it many times. Each file costs an OpenAI call.\n\nContinue?',
+    ui.ButtonSet.YES_NO);
+
+  if (resp !== ui.Button.YES) return;
+  processInboxAll();
+  ui.alert('Done. See the Sync Log tab for the process_done summary.');
 }
 
 /**
