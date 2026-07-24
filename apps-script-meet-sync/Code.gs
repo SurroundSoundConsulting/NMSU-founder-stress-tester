@@ -929,7 +929,21 @@ function processInbox() {
   var files       = inboxFolder.getFiles();
   var processed   = 0;
   var seen        = 0;
-  var stopReason  = 'inbox_empty';
+  var skipped     = 0;
+  var nonDoc      = 0;
+  var stopReason  = 'inbox_exhausted';
+
+  // Fail loudly if CONFIG is being shadowed by a stray CONFIG.gs file in the
+  // project. Apps Script concatenates all .gs files into one global scope, so a
+  // second `var CONFIG` declaration silently overwrites loadConfig_()'s. That
+  // produced `batch limit=undefined, budget=NaNs` and disabled both guards.
+  if (typeof CONFIG.INBOX_BATCH_LIMIT !== 'number' || typeof CONFIG.INBOX_MAX_RUN_MS !== 'number') {
+    var msg = 'CONFIG is missing INBOX_BATCH_LIMIT/INBOX_MAX_RUN_MS. A stray ' +
+              'CONFIG.gs is almost certainly shadowing loadConfig_(). Delete ' +
+              'CONFIG.gs (and any CODE_*.gs duplicates) from the Apps Script project.';
+    logSyncActivity('config_error', '', '', msg);
+    throw new Error(msg);
+  }
 
   logSyncActivity('process_start', '', '', 'Scanning inbox (batch limit=' + CONFIG.INBOX_BATCH_LIMIT + ', budget=' + Math.round(CONFIG.INBOX_MAX_RUN_MS/1000) + 's)');
 
@@ -973,7 +987,7 @@ function processInbox() {
     seen++;
 
     // Only handle Google Docs
-    if (file.getMimeType() !== 'application/vnd.google-apps.document') continue;
+    if (file.getMimeType() !== 'application/vnd.google-apps.document') { nonDoc++; continue; }
 
     // Idempotency: skip if already fully processed.
     // NOTE: We check by the COPY's file ID (inbox file ID), not the source ID.
@@ -981,6 +995,7 @@ function processInbox() {
     if (processedSet[fileId]) {
       // Intentionally NOT logging every skip — with a large processed set,
       // logging N skips per run swamped the Sync Log. Silent skip.
+      skipped++;
       continue;
     }
 
@@ -1036,10 +1051,11 @@ function processInbox() {
   }
 
   var elapsedSec = Math.round((Date.now() - startMs) / 1000);
+  var remaining  = files.hasNext() ? 'yes' : 'no';
   logSyncActivity('process_done', '', '',
-    'Processed ' + processed + ' file(s) in ' + elapsedSec + 's ' +
-    '(saw ' + seen + ', stopped=' + stopReason + '). ' +
-    'Next trigger continues if more remain.');
+    'Processed ' + processed + ' new file(s) in ' + elapsedSec + 's. ' +
+    'Inbox scan: ' + seen + ' seen, ' + skipped + ' already processed, ' +
+    nonDoc + ' non-Doc. Stopped=' + stopReason + '. More files left in inbox: ' + remaining + '.');
 }
 
 // ============================================================
