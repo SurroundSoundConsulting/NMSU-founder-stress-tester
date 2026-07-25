@@ -1680,9 +1680,22 @@ function findExecutionCandidates_(sheet) {
     var status     = String(r[MASTER_COLS.STATUS] || '').trim().toLowerCase();
     var outputLink = String(r[EXECUTION_COLS.EXECUTION_OUTPUT_LINK] || '').trim();
     var forceRerun = String(r[EXECUTION_COLS.FORCE_RERUN] || '').trim().toLowerCase();
+    var execStatus = String(r[EXECUTION_COLS.EXECUTION_STATUS] || '').trim();
 
     if (status === 'done') continue;
-    if (outputLink && forceRerun !== 'yes') continue;
+
+    // Force Re-run is the universal "reconsider this row now" lever and wins
+    // over both skips below. It is consumed (reset to No) once the row has been
+    // re-classified, so one "Yes" buys exactly one reconsideration.
+    if (forceRerun !== 'yes') {
+      if (outputLink) continue;
+
+      // Already triaged (Missing Info / Not Automatable) and waiting on a human.
+      // Without this skip the batch cap would re-classify the same first N rows
+      // on every pass — a Missing Info row never acquires an output link — and
+      // rows further down the board would never be reached at all.
+      if (execStatus) continue;
+    }
 
     candidates.push({ rowNum: i + 2, values: r });
     if (candidates.length >= CONFIG.EXECUTION_BATCH_LIMIT) break;
@@ -2192,6 +2205,15 @@ function runExecutionWorkbench() {
         classification.__taskId = taskId;
         var statusInfo = classificationToStatus_(classification);
         writeClassificationToRow_(sheet, c.rowNum, classification, statusInfo);
+
+        // Consume the Force Re-run request now that the row has been
+        // reconsidered. If it goes on to execute, executeAndWriteback_ sets the
+        // same value again — harmless. Leaving it as "Yes" would make the row a
+        // permanent candidate and let it monopolise the batch cap every pass.
+        if (String(c.values[EXECUTION_COLS.FORCE_RERUN] || '').trim().toLowerCase() === 'yes') {
+          sheet.getRange(c.rowNum, EXECUTION_COLS.FORCE_RERUN + 1).setValue('No');
+        }
+
         c.classification = classification;
         c.statusInfo     = statusInfo;
         classified++;
