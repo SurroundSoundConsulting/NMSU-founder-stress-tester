@@ -78,7 +78,23 @@ function loadConfig_() {
     // Overrides:
     //   processInboxSince(90)  — custom window, run manually
     //   processInboxAll()      — no filter at all, run manually
-    PROCESS_LOOKBACK_DAYS: 14
+    PROCESS_LOOKBACK_DAYS: 14,
+
+    // Only Master Action Board rows whose owner matches one of these names are
+    // eligible for the execution workbench. Everyone else's tasks still get
+    // extracted, OKR-mapped, and tracked on the board — they just never consume
+    // a gpt-5 classify call or produce a deliverable Doc.
+    //
+    // Matching is case-insensitive and whitespace-trimmed. Multi-owner cells are
+    // split on , / & and "and", so "Rod & Carol" matches. See ownerIsInScope_().
+    //
+    // Set to [] to disable the filter and let the workbench consider every row.
+    // Override per-deployment with an EXECUTION_OWNER_ALLOWLIST Script Property
+    // holding a comma-separated list.
+    EXECUTION_OWNER_ALLOWLIST: p.EXECUTION_OWNER_ALLOWLIST
+      ? String(p.EXECUTION_OWNER_ALLOWLIST).split(',').map(function(s) { return s.trim(); })
+                                           .filter(function(s) { return s.length > 0; })
+      : ['Rodrigo Fuentes', 'Rod']
   };
 }
 
@@ -1667,6 +1683,34 @@ function ensureExecutionColumns_(sheet) {
  *   rowNum is 1-based sheet row (header is 1, data starts at 2).
  *   values is the full row array, length >= 26.
  */
+/**
+ * True when an owner cell names someone on CONFIG.EXECUTION_OWNER_ALLOWLIST.
+ *
+ * The board's owner column comes from an LLM reading a transcript, so it is not
+ * a clean key: it may hold "Rodrigo Fuentes", bare "Rod", or a shared owner like
+ * "Rod & Carol". We split on common separators and compare each part exactly
+ * (case-insensitive) rather than doing a substring test — substring matching on
+ * "Rod" would also fire on "Rodney" or "Rodrigues".
+ *
+ * An empty allowlist means "no filter" and matches everything.
+ */
+function ownerIsInScope_(ownerCell) {
+  var allow = CONFIG.EXECUTION_OWNER_ALLOWLIST;
+  if (!allow || allow.length === 0) return true;
+
+  var allowLower = allow.map(function(a) { return String(a).trim().toLowerCase(); });
+
+  var parts = String(ownerCell || '')
+    .split(/\s*(?:,|\/|&|\band\b)\s*/i)
+    .map(function(s) { return s.trim().toLowerCase(); })
+    .filter(function(s) { return s.length > 0; });
+
+  for (var i = 0; i < parts.length; i++) {
+    if (allowLower.indexOf(parts[i]) !== -1) return true;
+  }
+  return false;
+}
+
 function findExecutionCandidates_(sheet) {
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
@@ -1675,6 +1719,7 @@ function findExecutionCandidates_(sheet) {
   var rows  = sheet.getRange(2, 1, lastRow - 1, width).getValues();
 
   var candidates = [];
+  var outOfScope = 0;
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i];
     var status     = String(r[MASTER_COLS.STATUS] || '').trim().toLowerCase();
@@ -1685,9 +1730,14 @@ function findExecutionCandidates_(sheet) {
     if (status === 'done') continue;
 
     // Force Re-run is the universal "reconsider this row now" lever and wins
-    // over both skips below. It is consumed (reset to No) once the row has been
-    // re-classified, so one "Yes" buys exactly one reconsideration.
+    // over every skip below, including the owner filter — setting it by hand is
+    // an explicit instruction to work this row whoever owns it. It is consumed
+    // (reset to No) once the row has been re-classified, so one "Yes" buys
+    // exactly one reconsideration.
     if (forceRerun !== 'yes') {
+      // Someone else's task. Tracked on the board, never auto-executed.
+      if (!ownerIsInScope_(r[MASTER_COLS.OWNER])) { outOfScope++; continue; }
+
       if (outputLink) continue;
 
       // Already triaged (Missing Info / Not Automatable) and waiting on a human.
@@ -1699,6 +1749,13 @@ function findExecutionCandidates_(sheet) {
 
     candidates.push({ rowNum: i + 2, values: r });
     if (candidates.length >= CONFIG.EXECUTION_BATCH_LIMIT) break;
+  }
+
+  if (outOfScope > 0) {
+    logSyncActivity('exec_owner_filter', '', '',
+      'Skipped ' + outOfScope + ' row(s) owned by someone outside [' +
+      CONFIG.EXECUTION_OWNER_ALLOWLIST.join(', ') + ']. ' +
+      'Set Force Re-run = Yes on a row to work it anyway.');
   }
 
   return candidates;
@@ -2209,7 +2266,22 @@ function runExecutionWorkbench() {
   }
 
   try {
-    logSyncActivity('exec_start', '', '', 'Workbench pass starting (batch limit ' + CONFIG.EXECUTION_BATCH_LIMIT + ').');
+    // Same failure mode as processInbox: a stray CONFIG.gs in the project
+    // redeclares var CONFIG and silently drops keys added here. An undefined
+    // allowlist would make ownerIsInScope_ return true for everyone, quietly
+    // reinstating the behaviour this filter exists to prevent.
+    if (!Array.isArray(CONFIG.EXECUTION_OWNER_ALLOWLIST)) {
+      throw new Error(
+        'CONFIG.EXECUTION_OWNER_ALLOWLIST is ' + typeof CONFIG.EXECUTION_OWNER_ALLOWLIST +
+        ', expected an array. CONFIG is almost certainly shadowed by another .gs ' +
+        'file declaring "var CONFIG" — delete it and re-run.');
+    }
+
+    logSyncActivity('exec_start', '', '',
+      'Workbench pass starting (batch limit ' + CONFIG.EXECUTION_BATCH_LIMIT + ', owners: ' +
+      (CONFIG.EXECUTION_OWNER_ALLOWLIST.length
+        ? CONFIG.EXECUTION_OWNER_ALLOWLIST.join(' / ')
+        : 'ALL — filter disabled') + ').');
 
     var ss    = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
     var sheet = ss.getSheetByName(CONFIG.TAB_MASTER);
