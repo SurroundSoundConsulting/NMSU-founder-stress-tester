@@ -1717,7 +1717,7 @@ function buildClassifierSystemPrompt_(okrContext) {
     '  "execution_needed": "Yes" | "No",',
     '  "is_executable": true | false,',
     '  "execution_type": string,           // short label: "draft email", "summary", "checklist", "doc outline", "spec", "agenda", etc. Empty string if execution_needed is No.',
-    '  "missing_info": string,             // concrete missing facts (audience, success criteria, links, definitions). Empty string when nothing concrete is missing.',
+    '  "missing_info": string,             // BLOCKING gaps only — see the strict test below. Empty string in the common case.',
     '  "generated_prompt": string,         // the exact prompt to send to a downstream execution LLM. Empty string if execution_needed is No or is_executable is false.',
     '  "should_execute_now": true | false  // see HARD RULE below',
     '}',
@@ -1731,15 +1731,42 @@ function buildClassifierSystemPrompt_(okrContext) {
     'is_executable = false when:',
     '- An LLM cannot produce the deliverable even with perfect context: signing, calling, paying, attending, deploying, demoing in person, anything requiring credentials or human presence.',
     '',
-    'missing_info should list CONCRETE GAPS, not vague "needs more detail":',
-    '- Who is the audience? What is the desired tone? What is the success criterion? What URL / doc / metric is referenced? What constraints apply?',
-    '- Empty string when the task already has enough context for an LLM to produce a useful first draft.',
+    'missing_info — READ THIS CAREFULLY. This is the most commonly misused field.',
+    'A non-empty missing_info BLOCKS execution entirely and forces a human to stop and type the answers by hand. That is expensive. Reserve it for cases where it is genuinely warranted.',
+    '',
+    'Apply this test to each candidate gap. Include it ONLY if the answer is yes:',
+    '  "Without this specific fact, would the deliverable be WRONG, misleading, or actively harmful if the owner sent it as-is after a quick edit?"',
+    'If the deliverable would merely be more GENERIC without the fact, the answer is no. Leave it out and proceed.',
+    '',
+    'BLOCKING (include in missing_info):',
+    '- The substantive content to be transformed does not exist in the row and cannot be inferred at all — e.g. "rewrite the answers to match the new policy" when neither the answers nor the policy text is available. There is nothing to operate on.',
+    '- A factual claim would have to be fabricated in a way a reader would rely on: specific metrics, dollar amounts, dates of past events, named client results, legal or regulatory commitments.',
+    '- The task hinges on a decision only the owner can make, and every plausible option leads to a materially different deliverable.',
+    '',
+    'NOT BLOCKING (never include these — make a sensible assumption instead):',
+    '- Tone, voice, length, or format preferences. Choose a professional default.',
+    '- Email signatures, phone numbers, LinkedIn URLs, headshots, job titles, pronouns, company boilerplate. Use a clear placeholder like [PHONE].',
+    '- Exact word counts, character limits, submission portal links, form field names.',
+    '- Availability, time zones, meeting durations, scheduling links. Propose options or use a placeholder.',
+    '- Full names, spellings, or contact details of people named in the row. Use what the row gives you.',
+    '- Which channel to send on, which tool to file the task in, which reviewers to add.',
+    '- Brand or style guidelines, component libraries, accessibility or localisation requirements.',
+    '- Prior touch history, CRM field names, list segmentation details.',
+    '- Anything you could reasonably ask for as "confirm X" AFTER producing a draft.',
+    '',
+    'Default posture: produce the draft. A good first draft with three bracketed placeholders and a short assumptions list is far more useful to the owner than a request for ten facts. Most rows should come back with missing_info = "".',
+    '',
+    'When you proceed despite a soft gap, handle it INSIDE generated_prompt:',
+    '- Instruct the executor to use square-bracket placeholders for unknown specifics, e.g. [DRAFTS LINK], [PHONE].',
+    '- Instruct the executor to end its output with a short "Assumptions & to confirm" list naming what it guessed.',
+    'That way the gap is visible to the reviewer without blocking the work.',
     '',
     'generated_prompt rules:',
     '- Self-contained: assume the executor has only this prompt + the row\'s own context.',
     '- Specify the deliverable format explicitly (e.g. "Output a 3-paragraph email in plain text").',
     '- Include relevant constraints from the row: audience, tone, length, format.',
     '- Reference the OKR link if the task is OKR-aligned.',
+    '- Where a soft gap exists, tell the executor to use a [BRACKETED PLACEHOLDER] and to append an "Assumptions & to confirm" list.',
     '- Do NOT include a JSON wrapper. Plain instruction prose.',
     '',
     'HARD RULE for should_execute_now:',
@@ -2009,7 +2036,21 @@ function createExecutionDoc_(rowValues, classification, output, executionId) {
   // 1. Heading 1 — TaskID + task
   body.appendParagraph(taskId + ' · ' + task).setHeading(DocumentApp.ParagraphHeading.HEADING1);
 
-  // 2. Metadata table
+  // 2. LLM Output — the actual work product. First thing after the title so the
+  //    reviewer can read, judge, and copy it without scrolling past diagnostics.
+  body.appendParagraph('Deliverable').setHeading(DocumentApp.ParagraphHeading.HEADING2);
+  body.appendParagraph(output || '(empty)');
+
+  // 3. Review Notes — sits right under the deliverable, where the reviewer
+  //    already is when they form an opinion.
+  body.appendParagraph('Review Notes').setHeading(DocumentApp.ParagraphHeading.HEADING2);
+  body.appendParagraph(''); // intentional: reviewer fills this in
+
+  // ── Everything below is diagnostics, not work product ──
+  body.appendParagraph('').appendHorizontalRule();
+  body.appendParagraph('Diagnostics').setHeading(DocumentApp.ParagraphHeading.HEADING2);
+
+  // 4. Metadata table
   var metaTable = body.appendTable([
     ['Task ID',       taskId],
     ['Execution ID',  executionId],
@@ -2024,23 +2065,16 @@ function createExecutionDoc_(rowValues, classification, output, executionId) {
     metaTable.getCell(r, 0).getChild(0).asParagraph().editAsText().setBold(true);
   }
 
-  // 3. Generated Prompt (monospaced for QA legibility)
-  body.appendParagraph('Generated Prompt (sent to execution LLM — for QA)')
-      .setHeading(DocumentApp.ParagraphHeading.HEADING2);
-  var promptPara = body.appendParagraph(generatedPrompt || '(empty)');
-  promptPara.editAsText().setFontFamily('Roboto Mono');
-
-  // 4. LLM Output
-  body.appendParagraph('LLM Output').setHeading(DocumentApp.ParagraphHeading.HEADING2);
-  body.appendParagraph(output || '(empty)');
-
-  // 5. Missing Info
-  body.appendParagraph('Missing Info (from classification)').setHeading(DocumentApp.ParagraphHeading.HEADING2);
+  // 5. Missing Info (demoted to HEADING3 — diagnostics subsection)
+  body.appendParagraph('Missing Info (from classification)').setHeading(DocumentApp.ParagraphHeading.HEADING3);
   body.appendParagraph(missingInfo || 'None noted');
 
-  // 6. Review Notes (empty)
-  body.appendParagraph('Review Notes').setHeading(DocumentApp.ParagraphHeading.HEADING2);
-  body.appendParagraph(''); // intentional: reviewer fills this in
+  // 6. Generated Prompt (monospaced for QA legibility) — last, since it is only
+  //    consulted when the deliverable looks wrong and you need to know why.
+  body.appendParagraph('Generated Prompt (sent to execution LLM — for QA)')
+      .setHeading(DocumentApp.ParagraphHeading.HEADING3);
+  var promptPara = body.appendParagraph(generatedPrompt || '(empty)');
+  promptPara.editAsText().setFontFamily('Roboto Mono');
 
   doc.saveAndClose();
 
