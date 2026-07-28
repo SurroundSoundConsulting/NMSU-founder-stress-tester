@@ -289,19 +289,70 @@ function logSyncActivity(step, fileId, fileName, message) {
 // PROCESSED SOURCES — Idempotency log
 // Columns: source_event_id(A), source_file_id(B), source_file_name(C),
 //          source_type(D), meeting_date(E), meeting_title(F),
-//          copied_to_inbox_at(G), processed_at(H), status(I)
+//          copied_to_inbox_at(G), processed_at(H), status(I),
+//          content_fingerprint(J)
+// status is one of: copied | processed | duplicate
 // ============================================================
+
+var PROCESSED_HEADERS = [
+  'source_event_id', 'source_file_id', 'source_file_name', 'source_type',
+  'meeting_date', 'meeting_title', 'copied_to_inbox_at', 'processed_at', 'status',
+  'content_fingerprint'
+];
 
 /**
  * Ensure Processed Sources tab exists with the correct header row.
+ *
+ * content_fingerprint (column J) was added after the original 9-column schema,
+ * so sheets created earlier get it appended in place rather than rebuilt.
  */
 function ensureProcessedHeaders(sheet) {
   if (sheet.getLastRow() === 0) {
-    sheet.appendRow([
-      'source_event_id', 'source_file_id', 'source_file_name', 'source_type',
-      'meeting_date', 'meeting_title', 'copied_to_inbox_at', 'processed_at', 'status'
-    ]);
+    sheet.appendRow(PROCESSED_HEADERS);
+    return;
   }
+  if (sheet.getLastColumn() < PROCESSED_HEADERS.length) {
+    sheet.getRange(1, PROCESSED_HEADERS.length).setValue(
+      PROCESSED_HEADERS[PROCESSED_HEADERS.length - 1]);
+  }
+}
+
+/**
+ * Stable identity for a transcript's CONTENT, used to catch the same meeting
+ * arriving twice as two different Drive files.
+ *
+ * Why not hash the whole text: a Drive copy is not guaranteed to extract
+ * byte-identically. An observed pair of the same meeting came out at 20,615 and
+ * 20,643 chars — the tab structure and title line differ slightly — so a full
+ * hash misses. The opening of a Gemini notes doc is the meeting title plus its
+ * one-line summary and IS identical across copies, so we key on a normalised
+ * prefix plus the meeting date.
+ *
+ * PREFIX_LEN is 200 because that is the length over which the observed duplicate
+ * pair was verified byte-identical after whitespace normalisation. Widening it
+ * past the evidence risks reaching into text that legitimately differs between
+ * two extractions of the same meeting, which would silently disable dedupe.
+ *
+ * Returns '' when there isn't enough text to be confident, which disables
+ * dedupe for that file rather than risking a false match.
+ */
+function contentFingerprint_(text, meetingDate) {
+  var PREFIX_LEN = 200;
+  var norm = String(text || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+    .slice(0, PREFIX_LEN);
+  if (norm.length < 100) return '';
+
+  var raw = String(meetingDate || '') + '|' + norm;
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, raw);
+  var hex = '';
+  for (var i = 0; i < bytes.length; i++) {
+    var b = (bytes[i] < 0 ? bytes[i] + 256 : bytes[i]).toString(16);
+    hex += (b.length === 1 ? '0' : '') + b;
+  }
+  return hex;
 }
 
 /**
@@ -314,7 +365,7 @@ function getProcessedSourcesRows() {
   ensureProcessedHeaders(sheet);
   var lastRow = sheet.getLastRow();
   if (lastRow <= 1) return [];
-  return sheet.getRange(2, 1, lastRow - 1, 9).getValues();
+  return sheet.getRange(2, 1, lastRow - 1, PROCESSED_HEADERS.length).getValues();
 }
 
 /**
@@ -366,7 +417,7 @@ function getSourceMetadata(fileId) {
  * status is 'copied' when a file is first moved to the inbox,
  * then updated to 'processed' after Hive Mind writes to the board.
  */
-function logProcessedSource(eventId, fileId, fileName, sourceType, meetingDate, meetingTitle, status) {
+function logProcessedSource(eventId, fileId, fileName, sourceType, meetingDate, meetingTitle, status, fingerprint) {
   var ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
   var sheet = ss.getSheetByName(CONFIG.TAB_PROCESSED);
   if (!sheet) sheet = ss.insertSheet(CONFIG.TAB_PROCESSED);
@@ -382,7 +433,8 @@ function logProcessedSource(eventId, fileId, fileName, sourceType, meetingDate, 
     meetingTitle || '',                          // F meeting_title
     status === 'copied'    ? now : '',           // G copied_to_inbox_at
     status === 'processed' ? now : '',           // H processed_at
-    status       || ''                           // I status
+    status       || '',                          // I status
+    fingerprint  || ''                           // J content_fingerprint
   ]);
 }
 
@@ -1049,6 +1101,7 @@ function processInbox(daysBackOrEvent) {
   var tooOld      = 0;
   var undated     = 0;
   var doubleStamp = 0;
+  var duplicates  = 0;
   var stopReason  = 'inbox_exhausted';
 
   // Fail loudly if CONFIG is being shadowed by a stray CONFIG.gs file in the
@@ -1084,9 +1137,19 @@ function processInbox(daysBackOrEvent) {
   // 30-min timeouts once Processed Sources grew past a few hundred rows.
   var processedSet = {};
   var procRows = getProcessedSourcesRows();
+  var fingerprintSet = {};
   for (var pi = 0; pi < procRows.length; pi++) {
-    if (String(procRows[pi][8]) === 'processed') {
+    var rowStatus = String(procRows[pi][8]);
+
+    // 'duplicate' rows count as done too — otherwise every pass would re-open
+    // and re-fingerprint them. Only 'processed' rows seed the fingerprint set,
+    // so a duplicate never becomes the canonical copy of a meeting.
+    if (rowStatus === 'processed' || rowStatus === 'duplicate') {
       processedSet[String(procRows[pi][1])] = true;
+    }
+    if (rowStatus === 'processed') {
+      var fp = String(procRows[pi][9] || '');
+      if (fp) fingerprintSet[fp] = String(procRows[pi][2] || '(unnamed)');
     }
   }
   logSyncActivity('process_prefetch', '', '', 'Loaded ' + procRows.length + ' Processed Sources rows into idempotency set.');
@@ -1182,8 +1245,42 @@ function processInbox(daysBackOrEvent) {
       var meetingDate  = parseDateFromInboxName(fileName)
                          || Utilities.formatDate(file.getLastUpdated(), 'UTC', 'yyyy-MM-dd');
       var meetingTitle = parseTitleFromInboxName(fileName) || fileName;
+
+      // Classify from the FILENAME title, before any recovery below — the
+      // "Notes by Gemini" suffix is what identifies the artifact type, and a
+      // recovered meeting name like "Client Integration Touchbase" matches
+      // none of the MEET_TITLE_PATTERNS.
       var sourceType   = classifyDoc(meetingTitle) || 'unknown_meet_doc';
+
+      // A "Copy of [HM date] Notes by Gemini" file has lost its descriptive
+      // title, leaving a useless generic one on every task it produces. The
+      // transcript's own first line is the real meeting name — prefer it.
+      if (/^(?:notes by gemini|meeting transcript|meet transcript)$/i.test(meetingTitle)) {
+        var firstLine = String(text).split('\n')[0].trim();
+        if (firstLine && firstLine.length <= 120) {
+          logSyncActivity('title_recovered', fileId, fileName,
+            'Generic filename title "' + meetingTitle + '" replaced with first content line: "' + firstLine + '"');
+          meetingTitle = firstLine;
+        }
+      }
+
       logSyncActivity('doc_meta', fileId, fileName, 'meetingDate=' + meetingDate + ' | meetingTitle=' + meetingTitle + ' | sourceType=' + sourceType + ' | okrContext=' + (okrContext ? okrContext.length + ' chars' : 'EMPTY'));
+
+      // Duplicate content check. The inbox accumulates copies of the same
+      // meeting (environment migrations, the old self-referential copy loop),
+      // and task-level dedupe in writeTasksToMasterBoard cannot absorb them:
+      // it keys on exact task+owner+due_date, and the LLM never words a
+      // re-extraction identically. Catch it here, before spending the call.
+      var fingerprint = contentFingerprint_(text, meetingDate);
+      if (fingerprint && fingerprintSet[fingerprint]) {
+        logSyncActivity('duplicate_content', fileId, fileName,
+          'Same meeting content already processed as "' + fingerprintSet[fingerprint] +
+          '". Recorded as duplicate; no OpenAI call, no board rows.');
+        logProcessedSource('', fileId, meetingTitle, sourceType, meetingDate, meetingTitle, 'duplicate', fingerprint);
+        processedSet[fileId] = true;
+        duplicates++;
+        continue;
+      }
 
       // Run Hive Mind analysis
       var result = parseWithHiveMind(text, meetingDate, okrContext);
@@ -1203,8 +1300,9 @@ function processInbox(daysBackOrEvent) {
       // Log the COPY's file ID as processed so future runs skip it.
       // (We use logProcessedSource rather than updateProcessedStatus because the copy ID
       // was never added to Processed Sources — only the source ID was, during Stage 1.)
-      logProcessedSource('', fileId, meetingTitle, sourceType, meetingDate, meetingTitle, 'processed');
+      logProcessedSource('', fileId, meetingTitle, sourceType, meetingDate, meetingTitle, 'processed', fingerprint);
       processedSet[fileId] = true; // keep in-memory set in sync so we don't reprocess if we loop again
+      if (fingerprint) fingerprintSet[fingerprint] = meetingTitle; // catch dupes within this same pass
       processed++;
 
     } catch (e) {
@@ -1213,9 +1311,10 @@ function processInbox(daysBackOrEvent) {
   }
 
   var elapsedSec = Math.round((Date.now() - startMs) / 1000);
-  var leftover   = Math.max(0, candidates.length - processed);
+  var leftover   = Math.max(0, candidates.length - processed - duplicates);
   logSyncActivity('process_done', '', '',
-    'Processed ' + processed + ' file(s) in ' + elapsedSec + 's. ' +
+    'Processed ' + processed + ' file(s) in ' + elapsedSec + 's' +
+    (duplicates ? ' (plus ' + duplicates + ' skipped as duplicate content)' : '') + '. ' +
     'Stopped=' + stopReason + '. ' +
     'Eligible remaining in window: ' + leftover + ' (next run continues). ' +
     'Outside ' + (cutoff ? lookbackDays + '-day window: ' + tooOld : 'window: 0') +
