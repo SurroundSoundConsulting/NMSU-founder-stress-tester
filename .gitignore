@@ -2,3 +2,22 @@ node_modules
 .env
 secrets/
 *-sa.json
+
+# macOS
+.DS_Store
+
+# Apps Script local snapshots. These are NOT part of the deployed project —
+# Code.gs is the single source file, and Apps Script concatenates every .gs in a
+# project into one global scope, so any of these sitting alongside it would
+# redeclare `var CONFIG` and silently replace the config loadConfig_() built.
+# Git history is the real backup; these are convenience copies only.
+apps-script-meet-sync/CODE_backup.gs
+apps-script-meet-sync/CODE_staging.gs
+
+# Holds hardcoded spreadsheet/folder IDs and an OPENAI_API_KEY placeholder.
+# Superseded by Script Properties (see loadConfig_). Never commit, never paste
+# into the Apps Script project.
+apps-script-meet-sync/CONFIG.gs
+
+# Stray editor scratch file
+apps-script-meet-sync/Untitled
