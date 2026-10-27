@@ -34,8 +34,9 @@ a missing completion marker, header rejection, and preservation of manual edits.
    `rootDir: "src"`. Run `npm run clasp -- status` to inspect upload contents.
 5. Run `npm run deploy:test`. This runs local tests and uploads source with clasp.
 6. In the Apps Script project's Script Properties set `OPENAI_API_KEY` privately,
-   `SPREADSHEET_ID` to the sandbox Sheet ID, and `SANDBOX_SPREADSHEET_ID` to
-   the same ID. Optional `OPENAI_MODEL` defaults to `gpt-4o-mini`.
+   `SPREADSHEET_ID` to the classroom Sheet ID. Run `createIntegrationSandbox`
+   once to create a separate test Sheet and set `SANDBOX_SPREADSHEET_ID`.
+   These IDs must differ. Optional `OPENAI_MODEL` defaults to `gpt-4o-mini`.
    Never put keys in code, chat, shared lab documents or screenshots.
 7. Run `setupBoard` once in the Apps Script editor and complete Google's consent.
    The manifest requests Sheets and external-request access only.
@@ -58,8 +59,9 @@ a missing completion marker, header rejection, and preservation of manual edits.
 6. Run `npm run test:integration`, or `npm run verify` to test, push, and run.
 
 The integration function requires SPREADSHEET_ID and SANDBOX_SPREADSHEET_ID to
-match. It uses a unique synthetic source ID each time and leaves its evidence
-rows in the sandbox for inspection. Each invocation makes one paid API request.
+refer to different spreadsheets. It uses a unique synthetic source ID each time and leaves its evidence
+rows only in the separate integration sandbox for inspection. It compares the
+classroom rows before and after every run and fails if they change. Each invocation makes one paid API request.
 It checks the three required tasks, allowed optional fourth task, dates, owners,
 agenda dependency, rejection of the unapproved launch, zero appended rows on
 rerun, and preservation of “Reviewed by me”. Review task source quotes and the
@@ -87,3 +89,34 @@ Never delete a completion marker to force re-extraction over human-edited rows.
 References: [Google clasp](https://github.com/google/clasp),
 [Execution API prerequisites](https://developers.google.com/apps-script/api/how-tos/execute),
 [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
+
+## Diagnose and verify test isolation
+
+The earlier test harness assigned a new source UUID on every invocation but
+required the test Sheet ID to equal the classroom Sheet ID. Thus each verification
+run appended another legitimate source batch to the visible classroom board.
+Same-source idempotency passed while the complete facilitator workflow was wrong.
+
+The regression tests now execute two full integration runs through the real
+processing boundary and require the classroom rows, IDs and edits to stay intact.
+CI runs these tests with the rest of `npm test`. The isolation gate refuses the
+classroom destination before calling OpenAI. No shared properties are temporarily
+changed during integration runs.
+
+Run `npm run qa:isolation` after deployment for two live integration runs, with
+classroom snapshots between runs, followed by a classroom duplicate/edit check.
+A successful run saves local, git-ignored `qa-evidence.json` with the observed
+counts, IDs, API response references and pass/fail checks.
+The classroom edit check temporarily writes a sentinel to one next_step cell,
+verifies it survives a rerun, and restores the original value. It refuses
+formula-bearing cells and avoids overwriting concurrent changes.
+
+For the one-time cleanup of earlier polluted classroom data, run
+`npm run qa:isolation -- --archive`. This makes full archive tabs of both the
+board and source ledger, verifies the board copy, then removes only `SYN-TEST-*`
+rows from the live classroom tabs. It retains the original `SYN-MTG-001` IDs,
+timestamps and human edits. Repeating cleanup is a no-op. Archive tabs are kept.
+
+Retrospective: QA must assert the final state the facilitator sees, including
+repeated invocations of the entire verification command. An isolated test passing
+is insufficient evidence that its test-data lifecycle is safe.

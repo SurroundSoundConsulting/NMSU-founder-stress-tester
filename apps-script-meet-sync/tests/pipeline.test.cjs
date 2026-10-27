@@ -1,21 +1,6 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const vm = require('node:vm');
-const fs = require('node:fs');
-const item = {task:'Compare supplier quotes',owner:'Jordan',status:'open',urgency:0,due_date:'',next_step:'',blockers:'',dependencies:'',okr_link:'',risk_flag:'',source_quote:'Jordan: I can do that. No committed date yet.'};
-function harness() {
-  const tabs = new Map(); let calls = 0; let status = 200; let response;
-  class Sheet {
-    constructor(){this.rows=[];this.formats=[];}
-    getLastRow(){return this.rows.length;}
-    setFrozenRows(){}
-    getRange(row,col,n=1,m=1){return {setNumberFormat:format=>this.formats.push({row,col,n,m,format}),getValues:()=>Array.from({length:n},(_,i)=>Array.from({length:m},(_,j)=>this.rows[row-1+i]?.[col-1+j] ?? '')),setValue:v=>this.getRange(row,col).setValues([[v]]),setValues:values=>values.forEach((r,i)=>r.forEach((v,j)=>{this.rows[row-1+i] ??=[];this.rows[row-1+i][col-1+j]=v;}))};}
-  }
-  const book = {getSheetByName:n=>tabs.get(n),insertSheet:n=>{const s=new Sheet();tabs.set(n,s);return s;},getUrl:()=> 'sandbox'};
-  const ctx=vm.createContext({console:{log(){}},PropertiesService:{getScriptProperties:()=>({getProperty:k=>k==='OPENAI_API_KEY'?'private-test-key':null})},SpreadsheetApp:{getActiveSpreadsheet:()=>book,flush(){}},LockService:{getScriptLock:()=>({waitLock(){},releaseLock(){}})},UrlFetchApp:{fetch:(url,options)=>{calls++;assert.equal(url,'https://api.openai.com/v1/chat/completions');const payload=JSON.parse(options.payload);assert.ok(payload.messages[1].content.includes('SYN-MTG-001'));const quotes=payload.response_format.json_schema.schema.properties.actionItems.items.properties.source_quote.enum;assert.ok(quotes.includes(item.source_quote));assert.equal(new Set(quotes).size,quotes.length);return {getResponseCode:()=>status,getContentText:()=>response ?? JSON.stringify({id:'completion-test',model:'test',choices:[{finish_reason:'stop',message:{content:JSON.stringify({actionItems:[item]})}}]})};}}});
-  for(const f of ['schema','synthetic','extraction','sheets','Code'])vm.runInContext(fs.readFileSync(`src/${f}.js`,'utf8'),ctx);
-  return {ctx,tabs,calls:()=>calls,setStatus:s=>status=s,setResponse:s=>response=s};
-}
+const {harness,item}=require('./helpers.cjs');
 test('live adapter, schema, duplicate guard and human edits',()=>{
  const h=harness(); const first=h.ctx.processSyntheticMeeting(); assert.equal(first.added,1); assert.equal(h.calls(),1);
  const board=h.tabs.get('Master Action Board');assert.equal(board.rows[1].length,16);assert.equal(board.rows[1][11],'SYN-MTG-001');assert.ok(board.formats.some(f=>f.row===2 && f.col===1 && f.m===16 && f.format==='@'));

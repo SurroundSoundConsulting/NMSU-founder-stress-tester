@@ -1,10 +1,10 @@
 function processSyntheticMeeting() { return processTranscript(SYNTHETIC); }
-function processTranscript(source) {
+function processTranscript(source, spreadsheetId) {
   if (!source || typeof source.id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(source.id) || typeof source.text !== 'string' || !source.text.trim() || typeof source.title !== 'string' || !validDate(source.date)) throw new Error('Invalid transcript');
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
-    var book = getBoardBook();
+    var book = getBoardBook(spreadsheetId);
     var board = ensureTab(book,'Master Action Board',HEADERS);
     var processed = ensureTab(book,'Processed Sources',['source_id','processed_at','task_count','evidence']);
     var rows = dataRows(board,16);

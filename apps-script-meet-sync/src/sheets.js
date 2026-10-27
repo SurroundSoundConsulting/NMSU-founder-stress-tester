@@ -1,5 +1,5 @@
-function getBoardBook() {
-  var id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+function getBoardBook(spreadsheetId) {
+  var id = spreadsheetId || PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
   var book = id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActiveSpreadsheet();
   if (!book) throw new Error('Set SPREADSHEET_ID for remote execution');
   return book;
@@ -12,8 +12,8 @@ function ensureTab(book,name,headers) {
   return sheet;
 }
 function dataRows(sheet,width) { return sheet.getLastRow() > 1 ? sheet.getRange(2,1,sheet.getLastRow()-1,width).getValues() : []; }
-function setupBoard() {
-  var book = getBoardBook();
+function setupBoard(spreadsheetId) {
+  var book = getBoardBook(spreadsheetId);
   ensureTab(book,'Master Action Board',HEADERS).setFrozenRows(1);
   ensureTab(book,'Processed Sources',['source_id','processed_at','task_count','evidence']);
   return {spreadsheetUrl:book.getUrl()};
