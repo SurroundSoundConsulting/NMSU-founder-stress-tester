@@ -1,117 +1,89 @@
-# Hive Mind Meet Sync — Setup Guide
+# NMSU Hive Mind — Week 1 facilitator
 
-## What This Is
+Implements the October 27, 2026 [participant lab](https://docs.google.com/document/d/1HF4p66MCX4z0wCxU9GjpkNI9JtKe2S7xVinLmM5Tz-g/edit).
+Google Apps Script runs the application; Node and clasp are development tools only.
 
-A Google Apps Script that automatically pulls Google Meet transcripts and
-Gemini meeting notes into your Hive Mind command-center Google Sheet.
+`src/` is the entire upload boundary. The prior `Code.gs`, `LEGACY-README.md`
+and discovery plan remain outside that boundary for later weeks. Do not upload
+both implementations into one project. No triggers, discovery, messaging or
+real-company transcripts are used by this Week 1 project.
 
-## Prerequisites
+## Local verification
 
-- Your Week 3 Google Sheet already set up (Master Action Board tab exists)
-- A Google Cloud / Workspace account with access to your Meet recordings
-- An OpenAI API key
+From this directory, with Node 20 or newer:
 
-## Step 1: Create the Drive Inbox Folder
-
-1. Open Google Drive
-2. Create a new folder: `Hive Mind Inbox`
-3. Inside it, create: `Raw Meet Artifacts`
-4. Copy the folder ID from the URL:
-   `drive.google.com/drive/folders/YOUR_FOLDER_ID`
-
-## Step 2: Create the Apps Script Project
-
-1. Go to https://script.google.com
-2. Click **New project**
-3. Name it: `Hive Mind Meet Sync`
-4. Delete the default `myFunction()` code
-5. Paste the full contents of `Code.gs` into the editor
-
-## Step 3: Edit CONFIG Values
-
-At the top of `Code.gs`, fill in:
-
-```javascript
-INBOX_FOLDER_ID: 'paste your Raw Meet Artifacts folder ID here',
-SPREADSHEET_ID:  'paste your command-center Google Sheet ID here',
-OPENAI_API_KEY:  'paste your OpenAI API key here',
+```sh
+npm ci
+npm test
 ```
 
-## Step 4: Enable Advanced Services (for Calendar attachment detection)
+The built-in Node test runner executes the same plain JavaScript as Apps Script
+inside a VM with mocked Google services. Local tests do not call OpenAI or Google.
+They verify schema, API errors, malformed responses, source guards, recovery after
+a missing completion marker, header rejection, and preservation of manual edits.
 
-1. In Apps Script: **Services** (left sidebar) → **+**
-2. Search for **Google Calendar API** → Enable
-3. This allows the script to read event attachments
+## One-time Google setup
 
-## Step 5: Grant OAuth Permissions
+1. Enable the Apps Script API at https://script.google.com/home/usersettings.
+2. Run `npm run clasp -- login` and authorize your Google account. Credentials
+   are stored in the git-ignored local `.clasprc.json`.
+3. Create a dedicated sandbox Sheet named **Hive Mind — Week 1 (Synthetic)**.
+   In that Sheet choose Extensions → Apps Script, and copy its Script ID from
+   Project Settings. This is the test project, not an existing operational project.
+4. Copy `.clasp.json.example` to `.clasp.json`, fill in the Script ID, retain
+   `rootDir: "src"`. Run `npm run clasp -- status` to inspect upload contents.
+5. Run `npm run deploy:test`. This runs local tests and uploads source with clasp.
+6. In the Apps Script project's Script Properties set `OPENAI_API_KEY` privately,
+   `SPREADSHEET_ID` to the sandbox Sheet ID, and `SANDBOX_SPREADSHEET_ID` to
+   the same ID. Optional `OPENAI_MODEL` defaults to `gpt-4o-mini`.
+   Never put keys in code, chat, shared lab documents or screenshots.
+7. Run `setupBoard` once in the Apps Script editor and complete Google's consent.
+   The manifest requests Sheets and external-request access only.
+8. Run `processSyntheticMeeting`. Inspect the Master Action Board and Processed
+   Sources. The latter records response ID, model and HTTP status as live-call
+   evidence without recording keys, headers or transcript contents.
 
-Run any function (e.g., `syncMeetArtifacts`) and follow the OAuth prompt.
-Grant access to: Calendar, Drive, Sheets, Docs, and external network calls.
+## Automated remote verification
 
-## Step 6: Confirm Sheet Tabs
+`clasp push` is source upload, not an Execution API deployment. To enable
+`npm run test:integration`:
 
-Your Google Sheet needs these tabs (the script will auto-create headers):
-- `Master Action Board`
-- `Processed Sources`
-- `Sync Log`
+1. Associate the script with a standard Google Cloud project in Project Settings.
+2. Enable the Apps Script API in that Cloud project.
+3. Configure an OAuth client in that same Cloud project and download its client
+   credentials locally as `execution.credentials.json` (git-ignored).
+4. Reauthorize using `npm run clasp -- login --creds execution.credentials.json
+   --use-project-scopes --include-clasp-scopes` (one command).
+5. In Apps Script choose Deploy → New deployment → API executable, access yourself.
+6. Run `npm run test:integration`, or `npm run verify` to test, push, and run.
 
-Add them manually or the script will create them on first run.
+The integration function requires SPREADSHEET_ID and SANDBOX_SPREADSHEET_ID to
+match. It uses a unique synthetic source ID each time and leaves its evidence
+rows in the sandbox for inspection. Each invocation makes one paid API request.
+It checks the three required tasks, allowed optional fourth task, dates, owners,
+agenda dependency, rejection of the unapproved launch, zero appended rows on
+rerun, and preservation of “Reviewed by me”. Review task source quotes and the
+board yourself: structural validation cannot prove every semantic inference.
 
-## Step 7: Run Backfill (first time only)
+The classroom demonstration uses the fixed `SYN-MTG-001` source. Calling
+`processSyntheticMeeting` again skips before the network request and preserves
+all rows, including timestamps and edits. Zero-task successes are also recorded.
+If rows exist but the completion marker is missing, processing stops for manual
+reconciliation instead of risking duplicate work. No automatic retries occur.
 
-In the Apps Script editor, run:
-```
-backfillRecentTranscripts(7)
-```
-This copies the last 7 days of Meet transcripts to the inbox.
-Then run `processInbox()` to extract action items.
+## Runtime design
 
-## Step 8: Set Up the Recurring Trigger
+- `synthetic.js`: exact lab transcript and stable source metadata.
+- `schema.js`: exact A–P contract, field validation, quote grounding (whitespace normalized, words unchanged), formula escaping.
+- `extraction.js`: strict JSON-schema OpenAI call with evidence restricted to unique transcript utterances; HTTP/refusal/truncation validation.
+- `sheets.js`: board access and non-destructive header validation.
+- `Code.js`: explicit processing with script lock, append-only writes, completion guard.
+- `integration.js`: live sandbox acceptance test and edit-preservation check.
 
-1. Click the **clock icon** (Triggers) in the left sidebar
-2. Click **+ Add Trigger**
-3. Function: `syncMeetArtifacts`
-4. Event source: **Time-driven**
-5. Type: **Minutes timer**
-6. Interval: **Every 15 minutes**
-7. Save
+All task data is validated before one batch append. The script lock covers both
+source checks and writes. A completion record is written only after board flush.
+Never delete a completion marker to force re-extraction over human-edited rows.
 
-## Daily Usage
-
-- `syncMeetArtifacts()` runs automatically every 15 minutes — discovers and copies new artifacts
-- `processInbox()` can be chained or run separately — extracts tasks to Master board
-- Check `Sync Log` tab to see what the script is doing
-- Check `Processed Sources` to see what has been processed
-
-## Manual Functions
-
-| Function | When to use |
-|----------|-------------|
-| `syncMeetArtifacts()` | Test the sync manually |
-| `processInbox()` | Process inbox manually |
-| `backfillRecentTranscripts(7)` | One-time: seed last N days |
-| `backfillRecentTranscripts(14)` | One-time: seed last 14 days |
-
-## Troubleshooting
-
-**No files found in Calendar scan:**
-- Check that Google Calendar API is enabled under Services
-- Verify your Calendar events have attached Docs (not just video links)
-- Increase LOOKBACK_MINUTES in CONFIG
-
-**Files found but not copied:**
-- Confirm INBOX_FOLDER_ID is correct (check Drive URL)
-- Confirm the script has Drive editor access (re-run OAuth prompt)
-
-**Tasks not appearing in Master Action Board:**
-- Check that SPREADSHEET_ID is correct
-- Verify the tab name exactly matches TAB_MASTER in CONFIG
-- Run processInbox() manually and check Sync Log for errors
-
-**Duplicate files in inbox:**
-- Check Processed Sources tab — the file should appear there
-- If missing, idempotency check is failing — file may have been deleted from Processed Sources
-
-**Same task appearing multiple times:**
-- Transcript-level idempotency is working but task dedup is weak on this match
-- Normalize the task wording in the source transcript or adjust task descriptions
+References: [Google clasp](https://github.com/google/clasp),
+[Execution API prerequisites](https://developers.google.com/apps-script/api/how-tos/execute),
+[OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs).

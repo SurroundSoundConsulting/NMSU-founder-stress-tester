@@ -1,0 +1,19 @@
+name: Week 1 Apps Script tests
+on:
+  push:
+    branches: [ai-coworker-session-1-oct2026]
+    paths: ['apps-script-meet-sync/**', '.github/workflows/week1-tests.yml']
+  pull_request:
+    paths: ['apps-script-meet-sync/**', '.github/workflows/week1-tests.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+        working-directory: apps-script-meet-sync

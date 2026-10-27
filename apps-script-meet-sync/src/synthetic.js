@@ -1,0 +1,4 @@
+var SYNTHETIC = {
+  id: 'SYN-MTG-001', title: 'Mesa Verde Robotics weekly planning', date: '2026-10-26',
+  text: 'Avery: We need the updated customer interview questions by Friday, October 30. Morgan, will you own the revised list?\nMorgan: Yes. I will put the revised questions in the shared folder by October 30, and I will send Avery the link.\n\nJordan: The pilot demo is next week. I can draft a one-page demo agenda, but I need the latest pilot scope from Avery before I start.\nAvery: I will share that scope after this call.\n\nMorgan: Our supplier quote looks high. Jordan, compare it with the second supplier quote and identify the main cost differences.\nJordan: I can do that. No committed date yet.\n\nAvery: I think we can launch on November 2, but that is a guess, not an approved date. Do not put it on the project calendar.'
+};
