@@ -180,12 +180,12 @@ test('staged entry point requires selected IDs rather than silently ingesting th
   initial(h);h.properties.set('WEEK2_SELECTED_FILE_IDS','one');assert.equal(h.ctx.processSelectedInbox().skipped,1);
 });
 
-test('live integration refuses shared or classroom destinations before extraction or setup writes',()=>{
+test('live integration refuses classroom output destinations before extraction or setup writes',()=>{
   const h=week2Harness(), before=JSON.stringify([...h.books].map(([id,b])=>[id,[...b.tabs.values()].map(t=>t.rows)]));
   assert.throws(()=>h.ctx.runWeek2IntegrationTests(),/separate test/);
   h.properties.set('WEEK2_TEST_SPREADSHEET_ID','classroom');h.properties.set('WEEK2_TEST_INBOX_FOLDER_ID','test-inputs');
   assert.throws(()=>h.ctx.runWeek2IntegrationTests(),/separate/);
-  h.properties.set('WEEK2_TEST_SPREADSHEET_ID','verification');h.properties.set('WEEK2_TEST_INBOX_FOLDER_ID','inputs');
+  h.properties.set('WEEK2_TEST_SPREADSHEET_ID','week2');h.properties.set('WEEK2_TEST_INBOX_FOLDER_ID','inputs');
   assert.throws(()=>h.ctx.runWeek2IntegrationTests(),/separate test/);
   assert.equal(h.calls(),0);assert.equal(JSON.stringify([...h.books].map(([id,b])=>[id,[...b.tabs.values()].map(t=>t.rows)])),before);
 });

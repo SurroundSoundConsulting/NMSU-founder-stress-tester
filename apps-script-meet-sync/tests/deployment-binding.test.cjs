@@ -18,3 +18,15 @@ test('Week 2 upload refuses missing, shared and legacy bindings before starting 
     r=run(['--week2','push']);assert.equal(r.status,1);assert.match(r.stderr,/different Apps Script project/);
   } finally { fs.rmSync(dir,{recursive:true,force:true}); }
 });
+
+test('an explicit upgrade uses the existing project binding without requiring a second project',()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'week2-upgrade-binding-'));
+  try {
+    fs.writeFileSync(path.join(dir,'.clasp.json'),JSON.stringify({scriptId:'existing-week1-project',rootDir:'src'}));
+    fs.mkdirSync(path.join(dir,'src'));fs.writeFileSync(path.join(dir,'src/week2.js'),'');
+    fs.mkdirSync(path.join(dir,'bin'));
+    fs.writeFileSync(path.join(dir,'bin/clasp'),'#!/bin/sh\nprintf "%s\\n" "$@"\n',{mode:0o755});
+    const r=spawnSync(process.execPath,[path.resolve('scripts/clasp.cjs'),'--upgrade','push','--force'],{cwd:dir,env:{...process.env,PATH:path.join(dir,'bin')},encoding:'utf8'});
+    assert.equal(r.status,0);assert.match(r.stdout,/-P\n\.clasp.json\npush\n--force/);
+  } finally { fs.rmSync(dir,{recursive:true,force:true}); }
+});

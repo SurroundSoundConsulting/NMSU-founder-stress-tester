@@ -17,15 +17,25 @@ function week2Hash(value) {
 function week2Config(options) {
   options = options || {};
   var props = PropertiesService.getScriptProperties();
+  var mode = options.mode || props.getProperty('WEEK2_MODE') || 'sandbox';
+  if (['sandbox','upgrade'].indexOf(mode) < 0) throw new Error('Invalid Week 2 mode');
+  var originalId = props.getProperty('SPREADSHEET_ID');
+  if (!originalId) {
+    var activeBook = SpreadsheetApp.getActiveSpreadsheet();
+    if (activeBook) originalId = activeBook.getId();
+    else if (mode === 'upgrade') throw new Error('Set SPREADSHEET_ID or open the existing bound Week 1 sheet');
+  }
   var config = {
+    mode: mode,
     folderId: options.folderId || props.getProperty('WEEK2_INBOX_FOLDER_ID'),
-    spreadsheetId: options.spreadsheetId || props.getProperty('WEEK2_SPREADSHEET_ID'),
+    spreadsheetId: options.spreadsheetId || props.getProperty('WEEK2_SPREADSHEET_ID') || (mode === 'upgrade' ? originalId : ''),
     maxSources: options.maxSources === undefined ? 5 : options.maxSources,
     budgetMs: options.budgetMs === undefined ? 180000 : options.budgetMs,
     sourceIds: options.sourceIds || [], createdAfter: options.createdAfter || ''
   };
   if (!/^[\w-]+$/.test(config.folderId || '') || !/^[\w-]+$/.test(config.spreadsheetId || '')) throw new Error('Set explicit WEEK2_INBOX_FOLDER_ID and WEEK2_SPREADSHEET_ID');
-  if (config.spreadsheetId === props.getProperty('SPREADSHEET_ID') || config.spreadsheetId === props.getProperty('SANDBOX_SPREADSHEET_ID')) throw new Error('Week 2 requires a destination separate from both Week 1 sheets');
+  if (mode === 'sandbox' && (config.spreadsheetId === originalId || config.spreadsheetId === props.getProperty('SANDBOX_SPREADSHEET_ID'))) throw new Error('Sandbox requires a destination separate from both Week 1 sheets');
+  if (mode === 'upgrade' && (config.spreadsheetId !== originalId || config.spreadsheetId === props.getProperty('SANDBOX_SPREADSHEET_ID') || config.spreadsheetId === props.getProperty('WEEK2_TEST_SPREADSHEET_ID'))) throw new Error('Upgrade must target the existing Week 1 board, not a test sheet');
   if (!Number.isInteger(config.maxSources) || config.maxSources < 1 || config.maxSources > 20 || !Number.isInteger(config.budgetMs) || config.budgetMs < 1000 || config.budgetMs > 240000) throw new Error('Invalid batch limits');
   if (!Array.isArray(config.sourceIds) || config.sourceIds.some(function(id) { return typeof id !== 'string' || !/^[\w-]+$/.test(id); })) throw new Error('Invalid selected source IDs');
   if (config.createdAfter && !validDate(config.createdAfter)) throw new Error('Invalid backfill creation date');

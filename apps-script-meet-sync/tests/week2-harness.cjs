@@ -33,7 +33,7 @@ function week2Harness() {
     books.set(id,{tabs,getId:()=>id,getUrl:()=>id,getSheetByName:n=>tabs.get(n),insertSheet:n=>{const s=new Sheet(n);tabs.set(n,s);return s;}});
   }
   function response(body,status=200) { return {getResponseCode:()=>status,getContentText:()=>typeof body==='string'?body:JSON.stringify(body)}; }
-  const ctx=vm.createContext({Date:Clock,console:{log(){}},PropertiesService:{getScriptProperties:()=>({getProperty:k=>properties.get(k)})},
+  const ctx=vm.createContext({Date:Clock,console:{log(){}},PropertiesService:{getScriptProperties:()=>({getProperty:k=>properties.get(k),setProperties:(values,replace)=>{if(replace)properties.clear();Object.entries(values).forEach(([k,v])=>properties.set(k,v));}})},
     Utilities:{getUuid:()=>crypto.randomUUID(),DigestAlgorithm:{SHA_256:'sha256'},Charset:{UTF_8:'utf8'},computeDigest:(_,s)=>Array.from(crypto.createHash('sha256').update(s).digest()),formatDate:()=>new Clock().toISOString().slice(0,10)},
     ScriptApp:{getOAuthToken:()=> 'private-google-token'},
     SpreadsheetApp:{getActiveSpreadsheet:()=>books.get('classroom'),openById:id=>{if(!books.has(id))throw Error('Unknown workbook');return books.get(id);},flush(){}},
@@ -61,7 +61,7 @@ function week2Harness() {
       throw Error('Unexpected request '+url);
     }}
   });
-  for(const f of ['schema','synthetic','extraction','sheets','Code','week2Input','week2Model','week2Merge','week2Store','week2','week2Views','week2Review','week2Integration'])vm.runInContext(fs.readFileSync(`src/${f}.js`,'utf8'),ctx);
+  for(const f of ['schema','synthetic','extraction','sheets','Code','week2Input','week2Model','week2Merge','week2Store','week2','week2Views','week2Review','week2Integration','week2Upgrade'])vm.runInContext(fs.readFileSync(`src/${f}.js`,'utf8'),ctx);
   ctx.setupBoard('classroom');ctx.setupBoard('sandbox');
   return {ctx,books,docs,properties,requests,calls:()=>calls,setReply:f=>{reply=f;},setFailure:f=>{fail=f;},setPages:p=>{pages=p;},consumeTextEscapes:()=>{consumeEscapes=true;},tick:()=>{now+=1000;},setLocked:v=>{locked=v;},rows:name=>books.get('week2').tabs.get(name).rows.slice(1),
     addDoc(id,date,text,extra={}) { docs.set(id,{id,name:id,mimeType:'application/vnd.google-apps.document',createdTime:date+'T12:00:00Z',body:`Northstar project ${id}\nMeeting date: ${date}\nTranscript\n${text}\n`,...extra}); },

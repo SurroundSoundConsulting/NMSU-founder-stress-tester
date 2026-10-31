@@ -1,8 +1,9 @@
 function week2State(book) {
   var state = {};
   Object.keys(WEEK2_TABLES).forEach(function(name) {
+    var existed = book.getSheetByName(name);
     var sheet = ensureTab(book,name,WEEK2_TABLES[name]);
-    sheet.setFrozenRows(1);
+    if (!existed) sheet.setFrozenRows(1);
     // Canonicalize literal formula-like text whether Sheets retains or consumes its escape.
     state[name] = dataRows(sheet,WEEK2_TABLES[name].length).map(function(row) { return row.map(safeCell); });
   });
