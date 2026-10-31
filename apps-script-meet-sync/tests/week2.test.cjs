@@ -9,6 +9,16 @@ function initial(h) {
   return h.run(['one']);
 }
 
+test('Week 2 model selection leaves the Week 1 model configuration unchanged',()=>{
+  const h=week2Harness();
+  h.properties.set('OPENAI_MODEL','week1-model');
+  h.properties.set('WEEK2_OPENAI_MODEL','week2-model');
+  initial(h);
+  const request=h.requests.find(r=>r.url==='https://api.openai.com/v1/chat/completions');
+  assert.equal(JSON.parse(request.options.payload).model,'week2-model');
+  assert.equal(h.properties.get('OPENAI_MODEL'),'week1-model');
+});
+
 test('multi-meeting repeat, reassignment, distinct deliverable, human conflict, clarification and empty success',()=>{
   const h=week2Harness(), before=JSON.stringify([...h.books.get('classroom').tabs.values()].map(s=>s.rows));
   assert.equal(initial(h).added,1);
