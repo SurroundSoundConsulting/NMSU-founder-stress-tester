@@ -10,6 +10,8 @@
     "clasp": "clasp -A .clasprc.json",
     "deploy:test": "npm test && node scripts/clasp.cjs push --force",
     "test:integration": "node scripts/clasp.cjs run runIntegrationTests",
+    "deploy:week2:test": "npm test && node scripts/clasp.cjs --week2 push --force",
+    "test:week2:integration": "node scripts/clasp.cjs --week2 run runWeek2IntegrationTests",
     "verify": "npm run deploy:test && npm run test:integration",
     "qa:isolation": "node scripts/qa-isolation.cjs"
   },

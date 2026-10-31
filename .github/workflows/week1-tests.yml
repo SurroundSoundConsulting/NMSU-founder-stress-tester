@@ -1,7 +1,7 @@
-name: Week 1 Apps Script tests
+name: Apps Script tests
 on:
   push:
-    branches: [ai-coworker-session-1-oct2026]
+    branches: [ai-coworker-session-1-oct2026, codex/week-2-build]
     paths: ['apps-script-meet-sync/**', '.github/workflows/week1-tests.yml']
   pull_request:
     paths: ['apps-script-meet-sync/**', '.github/workflows/week1-tests.yml']

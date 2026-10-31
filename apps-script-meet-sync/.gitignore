@@ -1,5 +1,6 @@
 node_modules/
 .clasp.json
+.clasp-week2.json
 .clasprc.json
 *.credentials.json
 qa-evidence.json
