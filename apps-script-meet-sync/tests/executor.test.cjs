@@ -134,3 +134,116 @@ test('ambiguous legacy and simple sheet names stop before changing either sheet'
   assert.throws(()=>h.ctx.setupExecutor(),/Duplicate task-sheet names/);
   assert.equal(h.book.tabs.get('Master Action Board').rows[0][0],'human data');assert.equal(h.book.tabs.get('Tasks').rows[1][0],'HM-0004');assert.equal(h.counts().calls,0);
 });
+
+test('source preparation accepts Doc links and pins pending context without approving or drafting',()=>{
+  const h=executorHarness(),row=h.book.tabs.get('Executor Context').rows[1];h.request[4]='no';
+  row[2]='https://docs.google.com/document/d/scope/edit?tab=t.0#heading=h.scope';row[3]='';row[5]='';row[6]='';row[7]='no';
+  const before=h.snapshot(),r=h.ctx.prepareExecutorContext({requestId:'req1'});
+  assert.equal(r.prepared_rows,1);assert.equal(row[2],'scope');assert.equal(row[3],'context');assert.equal(row[5],'Arroyo pilot');assert.equal(row[6],h.ctx.executorHash(h.scope));assert.equal(row[7],'no');
+  assert.equal(r.sources[0].approval,'awaiting_human_review');assert.equal(h.snapshot(),before);assert.deepEqual(h.counts(),{calls:0,creates:0,writes:0});assert.equal(h.ctx.prepareExecutorContext({requestId:'req1'}).prepared_rows,0);
+  h.request[4]='yes';assert.equal(h.run().reason,'context_approval');assert.equal(h.counts().calls,0);
+  row[7]='yes';assert.equal(h.run().state,'ready_for_review');
+});
+
+test('source links accept only native Docs URLs or IDs, never arbitrary websites or pasted text',()=>{
+  const h=executorHarness();
+  for(const input of ['scope','https://docs.google.com/document/d/scope','https://docs.google.com/document/u/1/d/scope/edit'])assert.equal(h.ctx.executorSourceId(input),'scope');
+  for(const input of ['https://evil.example/document/d/scope/edit','https://docs.google.com.evil.example/document/d/scope/edit','http://docs.google.com/document/d/scope/edit','https://drive.google.com/file/d/scope/view','https://docs.google.com/document/d/scope/edit/extra','Here is my scope text',''])assert.throws(()=>h.ctx.executorSourceId(input),/source_link/);
+});
+
+test('preparation preserves accepted fingerprints and requires explicit pending approval for new links',()=>{
+  const h=executorHarness(),row=h.book.tabs.get('Executor Context').rows[1],before=JSON.stringify(row);h.outputs.get('scope').text+='Changed facts';
+  assert.throws(()=>h.ctx.prepareExecutorContext({requestId:'req1'}),error=>error.executorCode==='source_changed');assert.equal(JSON.stringify(row),before);
+  const g=executorHarness(),m=g.book.tabs.get('Executor Context').rows[1];m[2]='https://docs.google.com/document/d/scope/edit';const original=JSON.stringify(m);
+  assert.throws(()=>g.ctx.prepareExecutorContext({requestId:'req1'}),error=>error.executorCode==='context_approval');assert.equal(JSON.stringify(m),original);assert.equal(g.counts().calls,0);
+});
+
+test('preparation validates all sources before writing and detects human edits during reads',()=>{
+  const h=executorHarness(),row=h.book.tabs.get('Executor Context').rows[1];h.request[4]='no';row[2]='https://docs.google.com/document/d/scope/edit';row[7]='no';row[6]='';
+  h.files.get('meeting').parents=['wrong-folder'];const before=JSON.stringify(h.book.tabs.get('Executor Context').rows);
+  assert.throws(()=>h.ctx.prepareExecutorContext({requestId:'req1'}),error=>error.executorCode==='access');assert.equal(JSON.stringify(h.book.tabs.get('Executor Context').rows),before);
+  const g=executorHarness(),m=g.book.tabs.get('Executor Context').rows[1];g.request[4]='no';m[2]='https://docs.google.com/document/d/scope/edit';m[7]='no';m[6]='';let changed=false;
+  g.setHook(({url})=>{if(!changed&&url.includes('docs.googleapis.com')){changed=true;m[5]='Human changed project';}});
+  assert.throws(()=>g.ctx.prepareExecutorContext({requestId:'req1'}),error=>error.executorCode==='context_edited');assert.equal(m[5],'Human changed project');assert.equal(m[6],'');assert.equal(g.counts().creates,0);
+});
+
+test('preparation requires a selected request and disabled request before changing pending settings',()=>{
+  const h=executorHarness(),row=h.book.tabs.get('Executor Context').rows[1];row[7]='no';row[6]='';const before=JSON.stringify(row);
+  assert.throws(()=>h.ctx.prepareExecutorContext({requestId:'req1'}),error=>error.executorCode==='disable_request');assert.equal(JSON.stringify(row),before);
+  h.book.tabs.get('Executor Requests').rows.push(['req2',...h.request.slice(1)]);
+  assert.throws(()=>h.ctx.prepareExecutorContext(),error=>error.executorCode==='select_request');assert.equal(h.counts().calls,0);
+});
+
+test('preparation cannot change a published context and does not rewrite accepted settings on rerun',()=>{
+  const h=executorHarness();h.run();const before=JSON.stringify([...h.book.tabs].map(([k,s])=>[k,s.rows]));
+  assert.equal(h.ctx.prepareExecutorContext({requestId:'req1'}).prepared_rows,0);assert.equal(JSON.stringify([...h.book.tabs].map(([k,s])=>[k,s.rows])),before);
+  h.request[4]='no';const row=h.book.tabs.get('Executor Context').rows[1];row[7]='no';row[6]='';
+  assert.throws(()=>h.ctx.prepareExecutorContext({requestId:'req1'}),error=>error.executorCode==='published_context');assert.equal(row[6],'');assert.equal(h.counts().creates,1);
+});
+
+test('manual drafting logs actionable results even when selection stops before an execution exists',()=>{
+  const h=executorHarness(),logs=[];h.ctx.console.log=value=>logs.push(value);
+  const missing=h.ctx.runExecutor({requestId:'missing'});assert.equal(missing.reason,'request_not_found');assert.match(logs[0],/Selected request not found/);assert.equal(h.counts().calls,0);
+  const ready=h.run();assert.match(logs.at(-1),/Ready for review/);assert.ok(logs.at(-1).includes(ready.output_url));assert.doesNotMatch(logs.at(-1),/ready_for_review|request_not_found/);
+});
+
+test('Drafts displays human status/actions while journal codes and ordinary reruns stay unchanged',()=>{
+  const h=executorHarness(),r=h.run(),sheet=h.book.tabs.get('Drafts');
+  assert.equal(sheet.rows[0][6],'Status');assert.equal(sheet.rows[0][7],'Next step');assert.equal(sheet.rows[1][6],'Ready for review');assert.match(sheet.rows[1][7],/Open the linked draft/);
+  assert.equal(r.state,'ready_for_review');assert.equal(r.status,'Ready for review');assert.equal(h.state().state,'ready_for_review');assert.equal(h.ctx.inspectExecutor().executions[0][6],'ready_for_review');
+  const before=JSON.stringify([sheet.rows,h.book.tabs.get('Executor Journal').rows]);h.run();assert.equal(JSON.stringify([sheet.rows,h.book.tabs.get('Executor Journal').rows]),before);assert.equal(h.counts().creates,1);
+});
+
+test('blocked task/source messages give specific next steps and never make a drafting call',()=>{
+  for(const [change,status,action] of [[h=>h.book.tabs.get('Executor Context').rows.splice(1,1),'Needs source information',/scope Doc/],[h=>h.book.tabs.get('Executor Context').rows[1][7]='no','Needs source approval',/review the actual source/],[h=>h.book.tabs.get('Tasks').rows[2][3]='open','Waiting for a prerequisite',/Open Tasks/],[h=>h.book.tabs.get('Reviews').rows.push(['r','s','HM-0004','[]','clarification','{}','pending','','','']),'Needs a human decision',/Open Reviews/]]){
+    const h=executorHarness();change(h);const r=h.run();assert.equal(r.status,status);assert.match(r.next_action,action);assert.equal(h.book.tabs.get('Drafts').rows[1][6],status);assert.equal(h.counts().calls,0);assert.equal(h.counts().creates,0);
+  }
+});
+
+test('refresh migrates both old display formats without new journal events, timestamps or model work',()=>{
+  for(const original of [false,true]){
+    const h=executorHarness();h.book.tabs.get('Executor Context').rows[1][7]='no';h.run();
+    const record=h.state(),sheet=h.book.tabs.get('Drafts');sheet.rows[0]=Array.from(h.ctx.EXECUTOR_TABLES['Executor Executions']);sheet.rows[1]=Array.from(h.ctx.executorLegacyProjection(record,original));
+    const before=JSON.stringify(h.book.tabs.get('Executor Journal').rows),time=record.updated_at;
+    assert.equal(h.ctx.refreshExecutorStatus().updated_rows,1);assert.equal(sheet.rows[1][6],'Needs source approval');assert.equal(sheet.rows[1][9],time);assert.equal(JSON.stringify(h.book.tabs.get('Executor Journal').rows),before);
+    assert.equal(h.ctx.refreshExecutorStatus().updated_rows,0);assert.deepEqual(h.counts(),{calls:0,creates:0,writes:0});
+    h.ctx.setupExecutor();assert.equal(sheet.rows[0][6],'Status');
+  }
+});
+
+test('refresh refuses a human-edited row before updating any row or header',()=>{
+  const h=executorHarness();h.run();const sheet=h.book.tabs.get('Drafts');sheet.rows[0]=Array.from(h.ctx.EXECUTOR_TABLES['Executor Executions']);sheet.rows[1][7]='Human explanation';
+  const before=JSON.stringify([...h.book.tabs].map(([k,s])=>[k,s.rows]));
+  assert.throws(()=>h.ctx.refreshExecutorStatus(),error=>error.executorCode==='projection_conflict' && /Stop and inspect/.test(error.message));
+  assert.equal(JSON.stringify([...h.book.tabs].map(([k,s])=>[k,s.rows])),before);assert.equal(h.counts().creates,1);
+});
+
+test('completion evidence is a related document, never reported as a generated draft',()=>{
+  const h=executorHarness(),url='https://docs.google.com/document/d/completed/edit';
+  const result=h.ctx.executorDescribeResult({state:'possibly_done',reason:'Completion evidence: '+url});
+  assert.equal(result.status,'Work may already be complete');assert.equal(result.document_url,url);assert.match(result.next_action,/completion evidence/);assert.match(result.message,/No new draft/);
+  const done=h.ctx.executorDescribeResult({state:'possibly_done',reason:'task_done'});assert.equal(done.status,'Task already marked done');assert.equal(done.document_url,'');
+});
+
+test('uncertain writes and changed drafts always advise preservation even for otherwise retryable causes',()=>{
+  const h=executorHarness();for(const reason of ['quota','limit_runtime','model_http','create_unknown']){
+    const r=h.ctx.executorDescribeResult({state:'needs_reconciliation',reason,output_url:'https://docs.google.com/document/d/known/edit'});
+    assert.equal(r.status,'Check saved work before continuing');assert.match(r.next_action,/Stop and inspect/);assert.match(r.next_action,/do not create another draft/);assert.ok(r.document_url);
+  }
+  assert.equal(h.ctx.executorDescribeResult({state:'stale_requires_review',reason:'access'}).status,'Inputs changed — review needed');
+  assert.equal(h.ctx.executorDescribeResult({state:'stale_requires_review',reason:'access',output_url:'known'}).status,'Draft needs another check');
+});
+
+test('unknown errors are actionable without echoing private provider text; preview remains explicitly limited',()=>{
+  const h=executorHarness(),logs=[];h.ctx.console.log=value=>logs.push(value);
+  const r=h.ctx.executorDescribeResult({state:'failed',reason:'PRIVATE provider detail'});h.ctx.executorPrintResult(r);assert.ok(r.status);assert.ok(r.next_action);assert.doesNotMatch(logs.join('\n'),/PRIVATE/);
+  const preview=h.ctx.previewExecutorSelection()[0];assert.equal(preview.status,'Task eligible');assert.match(preview.message,/Supporting sources and access still need checking/);assert.equal(h.counts().calls,0);
+});
+
+test('source preparation uses plain messages and handles overlapping manual controls without changes',()=>{
+  const h=executorHarness(),logs=[];h.ctx.console.log=value=>logs.push(value);
+  h.request[4]='no';const row=h.book.tabs.get('Executor Context').rows[1];row[2]='https://docs.google.com/document/d/scope/edit';row[7]='no';row[6]='';
+  const r=h.ctx.prepareExecutorContext({requestId:'req1'});assert.equal(r.status,'Sources need your review');assert.match(logs.join('\n'),/Needs your review/);assert.doesNotMatch(logs.join('\n'),/awaiting_human_review/);assert.equal(row[7],'no');
+  const before=JSON.stringify([...h.book.tabs].map(([k,s])=>[k,s.rows]));h.setLocked(true);assert.equal(h.ctx.prepareExecutorContext().status,'Another run is active');assert.equal(h.ctx.refreshExecutorStatus().status,'Another run is active');h.setLocked(false);
+  assert.equal(JSON.stringify([...h.book.tabs].map(([k,s])=>[k,s.rows])),before);assert.deepEqual(h.counts(),{calls:0,creates:0,writes:0});
+});

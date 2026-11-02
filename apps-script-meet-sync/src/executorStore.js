@@ -6,6 +6,7 @@ var EXECUTOR_TABLES = {
   'Executor Sources': ['evidence_key','execution_id','evidence_json','evidence_hash'],
   'Executor Journal': ['event_id','execution_key','sequence','previous_hash','record_json','event_hash']
 };
+var EXECUTOR_DRAFT_HEADERS = ['execution_key','execution_id','Task ID','Task','Owner','Due date','Status','Next step','Document','updated_at'];
 function executorError(code) { throw new Error('Executor ' + code); }
 function executorJson(value) { return JSON.stringify(value); }
 function executorHash(value) { return week2Hash(typeof value === 'string' ? value : executorJson(value)); }
@@ -34,7 +35,8 @@ function executorRows(book, name, headers, optional) {
   var sheet = hiveSheet(book,name);
   if (!sheet) { if (optional) return []; executorError('missing_schema'); }
   if (sheet.getLastRow() > 1001) executorError('limit_records');
-  if (executorJson(sheet.getRange(1,1,1,headers.length).getValues()[0]) !== executorJson(headers)) executorError('schema');
+  var actualHeaders = sheet.getRange(1,1,1,headers.length).getValues()[0];
+  if (executorJson(actualHeaders) !== executorJson(headers) && !(name === 'Executor Executions' && executorJson(actualHeaders) === executorJson(EXECUTOR_DRAFT_HEADERS))) executorError('schema');
   var n = sheet.getLastRow()-1;
   if (n < 1) return [];
   var range = sheet.getRange(2,1,n,headers.length), values = range.getValues(), formulas = range.getFormulas();
@@ -68,21 +70,57 @@ function executorHistory(book) {
   return latest;
 }
 function executorProjection(record) {
-  return [record.key,record.id,record.task_id,record.task || '',record.owner || '',record.due || '',record.state,(record.reason || '')+(executorNextAction(record.reason) ? ': '+executorNextAction(record.reason) : ''),record.output_url || '',record.updated_at].map(safeCell);
+  var display = executorResult(record);
+  return [record.key,record.id,record.task_id,record.task || '',record.owner || '',record.due || '',display.status,display.next_action,display.document_url,record.updated_at].map(safeCell);
+}
+// Frozen old display formats allow an exact, guarded migration of existing rows.
+function executorLegacyProjection(record, original) {
+  return [record.key,record.id,record.task_id,record.task || '',record.owner || '',record.due || '',record.state,(record.reason || '')+(executorLegacyNextAction(record.reason,original) ? ': '+executorLegacyNextAction(record.reason,original) : ''),record.output_url || '',record.updated_at].map(safeCell);
+}
+function executorKnownProjection(book, row) {
+  return executorRead(book,'Executor Journal').some(function(event) {
+    if (event[1] !== row[0]) return false;
+    var record = JSON.parse(event[4]), current = executorJson(row);
+    return [executorProjection(record),executorLegacyProjection(record,false),executorLegacyProjection(record,true)].some(function(values) { return executorJson(values) === current; });
+  });
 }
 function executorProject(book, record) {
   var rows = executorRead(book,'Executor Executions'), index = rows.findIndex(function(r) { return r[0] === record.key; });
   var before = index < 0 ? null : rows[index].map(safeCell), allowed = !before;
   // Only known journal projections may be replaced; hand-edited cells are preserved.
-  executorRead(book,'Executor Journal').forEach(function(e) {
-    if (e[1] === record.key && executorJson(executorProjection(JSON.parse(e[4]))) === executorJson(before)) allowed = true;
-  });
+  if (before && executorKnownProjection(book,before)) allowed = true;
   if (!allowed) executorError('projection_conflict');
   var after = executorProjection(record);
   if (executorJson(after) !== executorJson(before)) {
     var range = hiveSheet(book,'Executor Executions').getRange(index < 0 ? rows.length+2 : index+2,1,1,after.length);
     range.setNumberFormat('@'); range.setValues([after]); SpreadsheetApp.flush();
   }
+}
+function executorRefreshDisplay(book) {
+  var rows = executorRead(book,'Executor Executions'), history = executorHistory(book);
+  // Validate the entire display before updating any row or header.
+  rows.forEach(function(row) { if (!history[row[0]] || !executorKnownProjection(book,row)) executorError('projection_conflict'); });
+  var sheet = hiveSheet(book,'Executor Executions'), changed = 0;
+  rows.forEach(function(row,i) {
+    var after = executorProjection(history[row[0]].record);
+    if (executorJson(after) === executorJson(row)) return;
+    var range = sheet.getRange(i+2,1,1,10);
+    if (executorJson(range.getValues()[0]) !== executorJson(row) || range.getFormulas()[0].some(Boolean)) executorError('projection_conflict');
+    range.setValues([after]); changed++;
+  });
+  var header = sheet.getRange(1,1,1,10);
+  if (executorJson(header.getValues()[0]) !== executorJson(EXECUTOR_DRAFT_HEADERS)) header.setValues([EXECUTOR_DRAFT_HEADERS]);
+  SpreadsheetApp.flush();
+  return changed;
+}
+function refreshExecutorStatus(options) {
+  var config = executorConfig(options), book = getBoardBook(config.spreadsheetId), lock = LockService.getScriptLock();
+  try { lock.waitLock(1000); } catch (_) { return executorPrintResult(executorDescribeResult({state:'deferred',reason:'busy'})); }
+  try {
+    var changed = executorRefreshDisplay(book);
+    return executorPrintResult({status:'Draft messages refreshed',message:changed+' saved display row(s) updated. Execution history, drafts and tasks were not changed.',next_action:'Open Drafts to see the current status and next step.',updated_rows:changed});
+  } catch (error) { throw executorVisibleError(error); }
+  finally { lock.releaseLock(); }
 }
 function executorSave(book, record, previous) {
   var current = executorHistory(book)[record.key];
@@ -119,7 +157,8 @@ function setupExecutor(options) {
   try {
     executorRows(book,'Master Action Board',HEADERS);
     Object.keys(EXECUTOR_TABLES).forEach(function(name) { if (hiveSheet(book,name)) executorRows(book,name,EXECUTOR_TABLES[name]); });
-    Object.keys(EXECUTOR_TABLES).forEach(function(name) { ensureTab(book,name,EXECUTOR_TABLES[name]); });
+    Object.keys(EXECUTOR_TABLES).forEach(function(name) { if (name !== 'Executor Executions' || !hiveSheet(book,name)) ensureTab(book,name,EXECUTOR_TABLES[name]); });
+    executorRefreshDisplay(book);
     setupExecutorNavigation(book);
     var tasks = hiveSheet(book,'Master Action Board');
     if (!tasks.getFilter()) tasks.getRange(1,1,tasks.getMaxRows(),HEADERS.length).createFilter();
@@ -129,5 +168,5 @@ function setupExecutor(options) {
 function inspectExecutor(options) {
   var config = executorConfig(options), book = getBoardBook(config.spreadsheetId);
   Object.keys(EXECUTOR_TABLES).forEach(function(name) { executorRead(book,name); });
-  return {spreadsheet_id:config.spreadsheetId,requests:executorRequests(book),executions:Object.values(executorHistory(book)).map(function(e) { return executorProjection(e.record); }),live_permissions_verified:false};
+  return {spreadsheet_id:config.spreadsheetId,requests:executorRequests(book),executions:Object.values(executorHistory(book)).map(function(e) { return executorLegacyProjection(e.record,false); }),live_permissions_verified:false};
 }

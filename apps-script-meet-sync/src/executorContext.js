@@ -3,6 +3,78 @@ function executorRequestValid(r) {
   if (String(r.version) !== '1' && (!executorId(r.previous_execution_id) || !r.revision_reason)) executorError('revision_request');
   if (Object.values(r).some(function(v) { return String(v).length > 2000; })) executorError('request');
 }
+function executorSourceId(value) {
+  var input = String(value || '').trim();
+  if (executorId(input)) return input;
+  var link = /^https:\/\/docs\.google\.com\/document\/(?:u\/\d+\/)?d\/([A-Za-z0-9_-]+)(?:\/(?:edit|view|preview))?\/?(?:[?#][^\s]*)?$/.exec(input);
+  if (!link || !executorId(link[1])) executorError('source_link');
+  return link[1];
+}
+// Preparation reads Docs and updates pending settings only. It never approves or drafts.
+function prepareExecutorContext(options) {
+  options = options || {};
+  var config = executorConfig(options), book = getBoardBook(config.spreadsheetId), lock = LockService.getScriptLock();
+  try { lock.waitLock(1000); } catch (_) { return executorPrintResult(executorDescribeResult({state:'deferred',reason:'busy'})); }
+  try {
+    var requests = executorRead(book,'Executor Requests'), rows = executorRead(book,'Executor Context');
+    var selectedId = options.requestId || PropertiesService.getScriptProperties().getProperty('EXECUTOR_SELECTED_REQUEST_ID');
+    var selected = requests.filter(function(row) { return !selectedId || row[0] === selectedId; });
+    if (selected.length !== 1) executorError('select_request');
+    var r = executorObject(EXECUTOR_TABLES['Executor Requests'],selected[0]); executorRequestValid(r);
+    if (config.taskIds.indexOf(r.task_id) < 0) executorError('not_enabled');
+    var mappings = rows.filter(function(row) { return row[1] === r.context_set_id; });
+    if (!mappings.length) executorError('context_missing');
+    if (mappings.length > 8) executorError('limit_sources');
+    var seen = {}, total = 0, changes = [], report = [], started = Date.now();
+    mappings.forEach(function(row) {
+      if (Date.now()-started > 180000) executorError('limit_runtime');
+      var m = executorObject(EXECUTOR_TABLES['Executor Context'],row), id = executorSourceId(m.file_id);
+      if (seen[id]) executorError('context_binding'); seen[id] = true;
+      var folder = {scope:config.contextFolder,transcript:config.transcriptFolder,completion:config.completionFolder}[m.role];
+      if (!folder || (m.folder_id && m.folder_id !== folder) || (m.project && m.project !== r.project)) executorError('context_binding');
+      executorFolder(folder,m.role === 'transcript' ? null : config.rootFolder,false);
+      var meta = executorMeta(id);
+      if (meta.trashed || meta.mimeType !== 'application/vnd.google-apps.document' || (meta.parents || []).indexOf(folder) < 0) executorError('access');
+      var doc = executorDocument(id), hash = executorHash(doc.text);
+      total += doc.text.length; if (total > 100000) executorError('limit_context');
+      if (m.role === 'transcript') {
+        var parsed = week2ReadSource({id:id,mimeType:meta.mimeType});
+        var marker = executorRows(book,'Processed Sources',WEEK2_TABLES['Processed Sources']).filter(function(v) { return v[0] === parsed.id; })[0];
+        if (!marker || JSON.parse(marker[3]).fingerprint !== parsed.fingerprint) executorError('source_changed');
+      }
+      if (m.approved === 'yes') {
+        if (m.file_id !== id || !m.folder_id || !m.project || (m.role !== 'transcript' && !m.expected_hash)) executorError('context_approval');
+        if (m.expected_hash && m.expected_hash !== hash) executorError('source_changed');
+      } else {
+        if (m.approved && m.approved !== 'no') executorError('context_approval');
+        var after = row.slice(); after[2] = id; after[3] = folder; after[5] = r.project; after[6] = hash; after[7] = 'no';
+        if (executorJson(row) !== executorJson(after)) changes.push({before:row,after:after});
+      }
+      report.push({source_key:m.source_key,title:doc.title || meta.name,url:'https://docs.google.com/document/d/'+id+'/edit',approval:m.approved === 'yes' ? 'already_approved' : 'awaiting_human_review'});
+    });
+    if (Date.now()-started > 180000) executorError('limit_runtime');
+    if (changes.length) {
+      if (r.enabled !== 'no') executorError('disable_request');
+      if (Object.values(executorHistory(book)).some(function(e) { return e.record.request.context_set_id === r.context_set_id && !executorRetryable(e.record); })) executorError('published_context');
+      if (executorJson(requests) !== executorJson(executorRead(book,'Executor Requests')) || executorJson(rows) !== executorJson(executorRead(book,'Executor Context'))) executorError('context_edited');
+      var sheet = hiveSheet(book,'Executor Context');
+      changes.forEach(function(change) {
+        var index = rows.findIndex(function(row) { return row[0] === change.before[0]; });
+        var range = sheet.getRange(index+2,1,1,9);
+        if (executorJson(range.getValues()[0]) !== executorJson(change.before)) executorError('context_edited');
+        range.setValues([change.after.map(safeCell)]);
+      });
+    }
+    SpreadsheetApp.flush();
+    var pending = report.some(function(source) { return source.approval !== 'already_approved'; });
+    var result = {request_id:r.request_id,prepared_rows:changes.length,sources:report,status:pending ? 'Sources need your review' : 'Source settings unchanged',message:changes.length+' source setting row(s) prepared. No draft or model call was made.',next_action:pending ? 'Open each source and review its facts before setting approval to yes. Enable the request and run drafting separately when ready.' : 'Run drafting separately when ready. Source preparation does not start it automatically.'};
+    executorPrintResult(result);
+    report.forEach(function(source) { console.log(source.title+' — '+(source.approval === 'already_approved' ? 'Previously approved' : 'Needs your review')+'\n'+source.url); });
+    return result;
+  } catch (error) {
+    throw executorVisibleError(error);
+  } finally { lock.releaseLock(); }
+}
 function executorSnapshot(book, r, config) {
   executorRequestValid(r);
   var board = executorUnique(executorRows(book,'Master Action Board',HEADERS));
@@ -126,5 +198,5 @@ function executorContext(book, r, config, snap) {
 }
 function previewExecutorSelection(options) {
   var config = executorConfig(options), book = getBoardBook(config.spreadsheetId), seen = {};
-  return executorRequests(book).map(function(r) { executorRequestValid(r); var key = executorKey(config,r); if (seen[key]) executorError('duplicate_request'); seen[key] = true; var s = executorSnapshot(book,r,config); return {request_id:r.request_id,task_id:r.task_id,key:key,reason:s.block || 'eligible',urgency:s.task[4],due:s.task[5]}; }).sort(function(a,b) { return b.urgency-a.urgency || (a.due || '9999').localeCompare(b.due || '9999') || a.task_id.localeCompare(b.task_id); });
+  return executorRequests(book).map(function(r) { executorRequestValid(r); var key = executorKey(config,r); if (seen[key]) executorError('duplicate_request'); seen[key] = true; var s = executorSnapshot(book,r,config); return executorDescribeResult({request_id:r.request_id,task_id:r.task_id,task:s.task[1],key:key,state:s.block === 'task_done' ? 'possibly_done' : s.block ? 'blocked' : 'eligible',reason:s.block || 'eligible',urgency:s.task[4],due:s.task[5]}); }).sort(function(a,b) { return b.urgency-a.urgency || (a.due || '9999').localeCompare(b.due || '9999') || a.task_id.localeCompare(b.task_id); });
 }
