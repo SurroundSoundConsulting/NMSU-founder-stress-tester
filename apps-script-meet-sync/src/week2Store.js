@@ -1,7 +1,7 @@
 function week2State(book) {
   var state = {};
   Object.keys(WEEK2_TABLES).forEach(function(name) {
-    var existed = book.getSheetByName(name);
+    var existed = hiveSheet(book,name);
     var sheet = ensureTab(book,name,WEEK2_TABLES[name]);
     if (!existed) sheet.setFrozenRows(1);
     // Canonicalize literal formula-like text whether Sheets retains or consumes its escape.
@@ -9,7 +9,7 @@ function week2State(book) {
   });
   state._boardFormulas = {};
   if (state['Master Action Board'].length) {
-    var formulas = book.getSheetByName('Master Action Board').getRange(2,1,state['Master Action Board'].length,16).getFormulas();
+    var formulas = hiveSheet(book,'Master Action Board').getRange(2,1,state['Master Action Board'].length,16).getFormulas();
     state['Master Action Board'].forEach(function(row,i) { state._boardFormulas[row[0]] = formulas[i]; });
   }
   return state;
@@ -25,7 +25,7 @@ function week2ReadKey(book, name, key) {
 
 function week2WriteKey(book, name, values) {
   var target = week2ReadKey(book,name,values[0]);
-  var range = book.getSheetByName(name).getRange(target.row,1,1,values.length);
+  var range = hiveSheet(book,name).getRange(target.row,1,1,values.length);
   range.setNumberFormat('@'); range.setValues([values]);
 }
 
@@ -45,7 +45,7 @@ function week2Commit(book, source, plan, now) {
   SpreadsheetApp.flush();
   plan.ops.forEach(function(op) {
     var row = week2AssertOperation(book,op,op.before);
-    var sheet = book.getSheetByName(op.tab);
+    var sheet = hiveSheet(book,op.tab);
     // On existing board rows write only changed cells, preserving unrelated manual columns.
     if (op.tab === 'Master Action Board' && op.before[0]) {
       op.after.forEach(function(value,col) {

@@ -40,10 +40,10 @@ function archiveClassroomTestRuns() {
 }
 function classroomSnapshot() {
   var book=getBoardBook();
-  return {spreadsheetUrl:book.getUrl(),rows:dataRows(book.getSheetByName('Master Action Board'),16)};
+  return {spreadsheetUrl:book.getUrl(),rows:dataRows(hiveSheet(book,'Master Action Board'),16)};
 }
 function verifyClassroomRerun() {
-  var book=getBoardBook(),board=book.getSheetByName('Master Action Board');
+  var book=getBoardBook(),board=hiveSheet(book,'Master Action Board');
   var before=dataRows(board,16);
   var first=processSyntheticMeeting();
   if (!first.skipped || first.added !== 0 || JSON.stringify(dataRows(board,16)) !== JSON.stringify(before)) throw new Error('Classroom rerun changed rows');

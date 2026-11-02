@@ -145,7 +145,7 @@ function requestExecutorRevision(taskId, priorExecutionId, reason, reviewedBy, o
     if (existing.length) return existing[0];
     var next = executorClone(prior.request); next.request_id = 'REQ-'+Utilities.getUuid(); next.version = String(Number(next.version)+1); next.previous_execution_id = priorExecutionId; next.revision_reason = reason; next.requested_by = reviewedBy; next.requested_at = executorNow(); next.no_known_completion_at = next.requested_at;
     executorRequestValid(next);
-    var sheet = book.getSheetByName('Executor Requests'); sheet.getRange(sheet.getLastRow()+1,1,1,14).setValues([EXECUTOR_TABLES['Executor Requests'].map(function(k) { return safeCell(next[k]); })]); SpreadsheetApp.flush();
+    var sheet = hiveSheet(book,'Executor Requests'); sheet.getRange(sheet.getLastRow()+1,1,1,14).setValues([EXECUTOR_TABLES['Executor Requests'].map(function(k) { return safeCell(next[k]); })]); SpreadsheetApp.flush();
     return next;
   } finally { lock.releaseLock(); }
 }

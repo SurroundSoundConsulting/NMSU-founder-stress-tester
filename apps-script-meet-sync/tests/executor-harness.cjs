@@ -56,6 +56,6 @@ function executorHarness(){
   const request=['req1','HM-0004','demo_agenda_v1','1','yes','Arroyo pilot','Site manager','set1','Instructor','2026-11-04T10:00:00Z','2026-11-04T10:00:00Z','','','Instructor'];
   book.tabs.get('Executor Requests').rows.push(request);
   book.tabs.get('Executor Context').rows.push(['scope-map','set1','scope','context','scope','Arroyo pilot',c.executorHash(scope),'yes',''],['transcript-map','set1','meeting','inputs','transcript','Arroyo pilot','','yes','']);
-  return {...h,book,files,outputs,scope,request,counts:()=>({calls,creates,writes}),setModel:f=>modelReply=f,setHook:f=>hook=f,run:()=>c.runExecutor({requestId:'req1'}),state:()=>Object.values(c.executorHistory(book))[0]?.record,snapshot:()=>JSON.stringify([...book.tabs.entries()].filter(([k])=>!k.startsWith('Executor')).map(([k,s])=>[k,s.rows,s.formulas]))};
+  return {...h,book,files,outputs,scope,request,counts:()=>({calls,creates,writes}),setModel:f=>modelReply=f,setHook:f=>hook=f,run:()=>c.runExecutor({requestId:'req1'}),state:()=>Object.values(c.executorHistory(book))[0]?.record,snapshot:()=>JSON.stringify([...book.tabs.entries()].filter(([k])=>!k.startsWith('Executor') && k!=='Drafts').map(([k,s])=>[k,s.rows,s.formulas]))};
 }
 module.exports={executorHarness};

@@ -31,7 +31,7 @@ function executorSnapshot(book, r, config) {
   var registry = rows['Source Registry'].filter(function(v) { return sourceIds.indexOf(v[0]) >= 0; });
   var contexts = executorRead(book,'Executor Context').filter(function(v) { return v[1] === r.context_set_id; });
   var completions = rows['Processed Sources'].filter(function(v) { return sourceIds.indexOf(v[0]) >= 0; });
-  var formulas = book.getSheetByName('Master Action Board').getRange(2,1,board.length,16).getFormulas();
+  var formulas = hiveSheet(book,'Master Action Board').getRange(2,1,board.length,16).getFormulas();
   var form = relevant.map(function(t) { return formulas[board.findIndex(function(b) { return b[0] === t[0]; })]; });
   var block = '';
   if (r.enabled !== 'yes' || config.taskIds.indexOf(r.task_id) < 0 || config.owners.indexOf(task[2]) < 0) block = 'not_enabled';

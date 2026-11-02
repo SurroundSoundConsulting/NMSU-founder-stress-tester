@@ -3,12 +3,12 @@ function runIntegrationTests() {
   var sandbox = props.getProperty('SANDBOX_SPREADSHEET_ID');
   var classroom = getBoardBook();
   if (!sandbox || sandbox === classroom.getId()) throw new Error('Integration requires a separate sandbox spreadsheet');
-  var beforeClassroom = JSON.stringify(dataRows(classroom.getSheetByName('Master Action Board'),16));
+  var beforeClassroom = JSON.stringify(dataRows(hiveSheet(classroom,'Master Action Board'),16));
   setupBoard(sandbox);
   var source = {id:'SYN-TEST-' + Utilities.getUuid(),title:SYNTHETIC.title,date:SYNTHETIC.date,text:SYNTHETIC.text};
   var first = processTranscript(source,sandbox);
   if (!first.evidence || first.evidence.http_status !== 200) throw new Error('Live API call not verified');
-  var board = getBoardBook(sandbox).getSheetByName('Master Action Board');
+  var board = hiveSheet(getBoardBook(sandbox),'Master Action Board');
   var rows = dataRows(board,16);
   var tasks = rows.filter(function(r) { return r[11] === source.id; });
   if (tasks.length < 3 || tasks.length > 4) throw new Error('Expected 3 or 4 source-grounded tasks; inspect board');
@@ -21,6 +21,6 @@ function runIntegrationTests() {
   var before = JSON.stringify(dataRows(board,16));
   var rerun = processTranscript(source,sandbox);
   if (!rerun.skipped || rerun.added !== 0 || JSON.stringify(dataRows(board,16)) !== before) throw new Error('Rerun changed human-edited rows');
-  if (JSON.stringify(dataRows(classroom.getSheetByName('Master Action Board'),16)) !== beforeClassroom) throw new Error('Integration changed classroom rows');
+  if (JSON.stringify(dataRows(hiveSheet(classroom,'Master Action Board'),16)) !== beforeClassroom) throw new Error('Integration changed classroom rows');
   return {classroom_unchanged:true,passed:true,task_count:tasks.length,source_id:source.id,live_call:first.evidence,duplicate_free:true,human_edit_preserved:true,spreadsheetUrl:getBoardBook(sandbox).getUrl()};
 }

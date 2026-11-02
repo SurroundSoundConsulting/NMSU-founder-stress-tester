@@ -11,6 +11,15 @@ function week2Harness() {
     constructor(name) { this.name=name;this.rows=[];this.formulas={}; }
     getLastRow() { return this.rows.length; }
     setFrozenRows() {}
+    getName() { return this.name; }
+    getMaxRows() { return 1000; }
+    getFilter() { return this.filter || null; }
+    hideSheet() { this.hidden=true; return this; }
+    showSheet() { this.hidden=false; return this; }
+    setName(name) {
+      for(const book of books.values()) if(book.tabs.get(this.name)===this) { book.tabs.delete(this.name);book.tabs.set(name,this);break; }
+      this.name=name;return this;
+    }
     getRange(row,col,n=1,m=1) {
       const key = `${row}:${col}`;
       return {
@@ -19,6 +28,7 @@ function week2Harness() {
         getFormula: () => this.formulas[key] || '',
         getFormulas: () => Array.from({length:n},(_,i)=>Array.from({length:m},(_,j)=>this.formulas[`${row+i}:${col+j}`] || '')),
         setFormula: value => { this.formulas[key]=value; },
+        createFilter: () => { this.filter={row,col,n,m}; return this.filter; },
         setNumberFormat() {},
         setValue: value => this.getRange(row,col).setValues([[value]]),
         setValues: values => {
@@ -30,7 +40,7 @@ function week2Harness() {
   }
   for (const id of ['classroom','sandbox','week2','verification']) {
     const tabs = new Map();
-    books.set(id,{tabs,getId:()=>id,getUrl:()=>id,getSheetByName:n=>tabs.get(n),insertSheet:n=>{const s=new Sheet(n);tabs.set(n,s);return s;}});
+    books.set(id,{tabs,getId:()=>id,getUrl:()=>id,getSheets:()=>[...tabs.values()],getSheetByName:n=>tabs.get(n),insertSheet:n=>{const s=new Sheet(n);tabs.set(n,s);return s;}});
   }
   function response(body,status=200) { return {getResponseCode:()=>status,getContentText:()=>typeof body==='string'?body:JSON.stringify(body)}; }
   const ctx=vm.createContext({Date:Clock,console:{log(){}},PropertiesService:{getScriptProperties:()=>({getProperty:k=>properties.get(k),setProperties:(values,replace)=>{if(replace)properties.clear();Object.entries(values).forEach(([k,v])=>properties.set(k,v));}})},

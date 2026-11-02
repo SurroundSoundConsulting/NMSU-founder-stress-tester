@@ -12,7 +12,7 @@ function runWeek2IntegrationTests() {
     if (!bookId) return '';
     var book = getBoardBook(bookId), state = {};
     Object.keys(WEEK2_TABLES).forEach(function(name) {
-      var sheet = book.getSheetByName(name);
+      var sheet = hiveSheet(book,name);
       if (!sheet) state[name] = null;
       else {
         var range = sheet.getRange(1,1,Math.max(1,sheet.getLastRow()),WEEK2_TABLES[name].length);
@@ -45,7 +45,7 @@ function runWeek2IntegrationTests() {
         var result = processInbox({mode:'sandbox',spreadsheetId:id,folderId:folder,maxSources:1,sourceIds:[sequence[index]]});
         stages.push(result);
         if (result.processed !== 1 || result.failed || result.needs_reconciliation || result.changed_requires_review) throw new Error('Live acceptance stage failed; inspect the test sheet logs');
-        var rows = dataRows(book.getSheetByName('Master Action Board'),16);
+        var rows = dataRows(hiveSheet(book,'Master Action Board'),16);
         if (index === 0) {
           if (fixtureRows(rows).length !== 5 || rows.length !== baselineCount+5) throw new Error('Meeting A must add five distinct tasks alongside the existing board');
           taskIds = fixtureRows(rows).map(function(r) { return {id:r[0],created:r[14],source:r[11]}; });
@@ -55,7 +55,7 @@ function runWeek2IntegrationTests() {
           var hardware = oneTask(fixtureRows(rows),/hardware|supplier|Sierra|Desert/i);
           if (hardware[2] !== 'Morgan' || hardware[5] !== '2026-11-09') throw new Error('Hardware reassignment/deadline update failed');
           var boardRow = rows.findIndex(function(r) { return r[0] === hardware[0]; })+2;
-          book.getSheetByName('Master Action Board').getRange(boardRow,6).setValue('2026-11-12');
+          hiveSheet(book,'Master Action Board').getRange(boardRow,6).setValue('2026-11-12');
         }
       }
     }
@@ -73,7 +73,6 @@ function runWeek2IntegrationTests() {
     var after = week2State(book);
     if (rerun.skipped !== 4 || taskSnapshot !== JSON.stringify(['Master Action Board','Task Baselines','Task History','Merge Reviews','Processed Sources'].map(function(n) { return after[n]; }))) throw new Error('Full rerun changed persistent task state');
     setupWeek2Views({mode:'sandbox',spreadsheetId:id,folderId:folder});
-    book.getSheetByName('View Settings').getRange(2,2).setValue('2026-11-04');
     return {passed:true,reused_completed_sequence:reused,task_count:6,total_task_count:after['Master Action Board'].length,legacy_task_count:baselineCount,legacy_state_preserved:true,pending_reviews:2,classroom_unchanged:true,stages:stages,source_evidence:after['Processed Sources'].map(function(r) { return {source_id:r[0],evidence:JSON.parse(r[3])}; }),views_require_visual_check:true,spreadsheetUrl:book.getUrl()};
   } finally {
     if (!week2Equal(protectedIds.map(snapshot),before)) throw new Error('Integration changed a protected classroom sheet');

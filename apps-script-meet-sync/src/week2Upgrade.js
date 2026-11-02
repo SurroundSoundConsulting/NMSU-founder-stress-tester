@@ -3,7 +3,7 @@
 function week2UpgradeSnapshot(book) {
   var snapshot = {};
   ['Master Action Board','Processed Sources'].forEach(function(name) {
-    var sheet = book.getSheetByName(name);
+    var sheet = hiveSheet(book,name);
     if (!sheet || !sheet.getLastRow()) throw new Error('Complete the Week 1 setup before upgrading');
     var width = name === 'Master Action Board' ? 16 : 4;
     var range = sheet.getRange(1,1,sheet.getLastRow(),width);
@@ -16,7 +16,7 @@ function week2UpgradePreflight(book) {
   var snapshot = week2UpgradeSnapshot(book);
   // Validate every existing destination before adding any tabs. Never rewrite a header.
   Object.keys(WEEK2_TABLES).forEach(function(name) {
-    var sheet = book.getSheetByName(name);
+    var sheet = hiveSheet(book,name);
     if (sheet && sheet.getLastRow() && !week2Equal(sheet.getRange(1,1,1,WEEK2_TABLES[name].length).getValues()[0],WEEK2_TABLES[name])) throw new Error('Headers mismatch: ' + name);
   });
   var rows = snapshot['Master Action Board'].values.slice(1), ids = rows.map(function(r) { return r[0]; });
