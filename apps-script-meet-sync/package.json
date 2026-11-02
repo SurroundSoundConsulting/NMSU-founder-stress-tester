@@ -11,7 +11,8 @@
     "deploy:test": "npm test && node scripts/clasp.cjs push --force",
     "test:integration": "node scripts/clasp.cjs run runIntegrationTests",
     "verify": "npm run deploy:test && npm run test:integration",
-    "qa:isolation": "node scripts/qa-isolation.cjs"
+    "qa:isolation": "node scripts/qa-isolation.cjs",
+    "session2": "node scripts/session2.cjs"
   },
   "devDependencies": {
     "@google/clasp": "3.4.1"

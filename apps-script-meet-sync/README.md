@@ -1,3 +1,5 @@
+Session 2 extends this existing project with conservative cross-meeting merges, review controls and operational views. See [SESSION2.md](SESSION2.md) for setup and commands, and [SESSION2-QA.md](SESSION2-QA.md) for observed acceptance results.
+
 # NMSU Hive Mind — Week 1 facilitator
 
 Implements the October 27, 2026 [participant lab](https://docs.google.com/document/d/1HF4p66MCX4z0wCxU9GjpkNI9JtKe2S7xVinLmM5Tz-g/edit).

@@ -3,3 +3,4 @@ node_modules/
 .clasprc.json
 *.credentials.json
 qa-evidence.json
+session2-private/
