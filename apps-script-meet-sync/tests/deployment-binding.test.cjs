@@ -30,3 +30,14 @@ test('an explicit upgrade uses the existing project binding without requiring a 
     assert.equal(r.status,0);assert.match(r.stdout,/-P\n\.clasp.json\npush\n--force/);
   } finally { fs.rmSync(dir,{recursive:true,force:true}); }
 });
+
+test('Executor upload requires an explicit mode and preserves the existing project binding',()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'executor-binding-'));
+  try {
+    fs.writeFileSync(path.join(dir,'.clasp.json'),JSON.stringify({scriptId:'existing-project',rootDir:'src'}));fs.mkdirSync(path.join(dir,'src'));fs.writeFileSync(path.join(dir,'src/executor.js'),'');
+    fs.mkdirSync(path.join(dir,'bin'));fs.writeFileSync(path.join(dir,'bin/clasp'),'#!/bin/sh\nprintf "%s\\n" "$@"\n',{mode:0o755});
+    const run=args=>spawnSync(process.execPath,[path.resolve('scripts/clasp.cjs'),...args],{cwd:dir,env:{...process.env,PATH:path.join(dir,'bin')},encoding:'utf8'});
+    for(const args of [['push'],['--upgrade','push'],['--week2','push']]){const r=run(args);assert.equal(r.status,1);assert.match(r.stderr,/explicit --executor/);}
+    const r=run(['--executor','push']);assert.equal(r.status,0);assert.match(r.stdout,/-P\n\.clasp.json\npush/);
+  } finally {fs.rmSync(dir,{recursive:true,force:true});}
+});
