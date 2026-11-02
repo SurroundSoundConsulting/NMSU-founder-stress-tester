@@ -18,7 +18,7 @@ Week 1 model setting was retained. Credentials and raw snapshots remain ignored.
 | A3: Meeting B | PASS on retry | One new freight task HM-0015; hardware HM-0014 changed to Morgan, due November 9. Other rows/timestamps are byte-for-byte unchanged from corrected A. Hardware ID, creation and original provenance survived. Earlier rejected attempt made no task/completion writes; its original cause was not captured. Rejection diagnostics now retain safe proposal evidence. |
 | A4: human edit | PASS | Hardware master deadline November 12; machine baseline still November 9. Helper initially refused an ambiguous prose match, then was fixed/tested to select stored hardware deliverable identity. |
 | A5: Meeting C | PASS after candidate enrichment | Zero new tasks, three task updates, two reviews. Scope and internal checklist done; customer checklist open; agenda open, due November 6, blocker/obsolete next step cleared, historical HM-0010 dependency retained. Hardware stayed November 12; conflict records baseline/current/proposed November 9/12/10. Initial clarification omitted candidate IDs; reusable quote-based enrichment added HM-0011/HM-0012 with before/after audit, without resolving it or re-extracting C. |
-| A6: Meeting D and final text | D processing PASS; final wording PENDING | D completed with zero task additions/updates/reviews. First proposal's unnecessary no-action review was rejected before writes; revised contract passed on retry. Two descriptions inherited from A still embed stale blocker/deadline wording (HM-0013/HM-0014). Their dedicated status/deadline fields are correct. A concrete wording correction was shown for facilitator approval and remains unapplied pending that answer. |
+| A6: Meeting D and final text | PASS after approved wording correction | D completed with zero task additions/updates/reviews. First proposal's unnecessary no-action review was rejected before writes; revised contract passed on retry. Facilitator explicitly approved removing stale blocker/deadline wording inherited from A in HM-0013/HM-0014. The audited correction changed only descriptions, their task-text baselines and update timestamps; source/provenance, all business fields, original records and both pending decisions were preserved. The pending deadline review snapshot was refreshed with before/after audit so wording maintenance does not invalidate its otherwise current facts. Final text checker passes with no stale descriptions. |
 | A7: operational views | PASS | Reference date November 4: Arroyo due view = HM-0013, HM-0012, HM-0015; no blocked rows; owner view includes all nine tasks including done/legacy work; blank risk/OKR views are valid. Actual Sheet formula outputs were read back. |
 | A8: full A–D rerun | PASS | Four skips, zero model requests, zero extractions. Exact before/after equality of master values/formulas, timestamps, baselines, history, reviews, journals, registry and completions. View values also identical. Run Log growth allowed. |
 
@@ -26,8 +26,8 @@ Task IDs: scope HM-0010; internal readiness checklist HM-0011; customer onboardi
 HM-0012; agenda HM-0013; hardware quotes HM-0014; freight options HM-0015.
 
 Both main-lab reviews remain pending. Neither checklist was selected for sending.
-The human November 12 deadline was not replaced. Final wording is deliberately
-reported separately; a green count/view check does not establish clean task text.
+The human November 12 deadline was not replaced. Final wording was checked separately and passed after the approved correction;
+a green count/view check alone does not establish clean task text.
 
 ## Reliability: isolated verification
 
@@ -54,7 +54,9 @@ no remaining actionable findings.
 
 Commands and operational controls are in [SESSION2.md](SESSION2.md). Private
 `session2-private/acceptance-A.json`, `acceptance-B.json`, `acceptance-C.json`,
-`acceptance-D.json` and `acceptance-rerun.json` record checks and snapshot names.
+`acceptance-D.json`, `acceptance-wording.json` and `acceptance-rerun.json` record
+checks and snapshot names. The wording checker verifies exact preservation of all
+other business fields, original records and pending review decisions.
 The rerun checker compares entire durable snapshots, not just row counts.
 Raw function responses retain safe API model/response/status evidence.
 

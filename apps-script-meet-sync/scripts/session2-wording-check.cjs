@@ -1,0 +1,15 @@
+const fs=require('node:fs'),assert=require('node:assert/strict');
+const [beforePath,afterPath]=process.argv.slice(2);if(!afterPath)throw new Error('Pass before and after snapshots');
+const before=JSON.parse(fs.readFileSync(beforePath)).state,after=JSON.parse(fs.readFileSync(afterPath)).state;
+const edits={'HM-0013':'Draft one-page demo agenda for Arroyo pilot','HM-0014':'Compare Arroyo pilot hardware quotes from Sierra Components and Desert Supply; identify main hardware cost differences'};
+const board='Master Action Board';assert.equal(after[board].values.length,before[board].values.length);assert.deepEqual(after[board].formulas,before[board].formulas);
+for(let i=0;i<before[board].values.length;i++){const old=before[board].values[i],current=after[board].values[i];if(!edits[old[0]])assert.deepEqual(current,old);else{assert.equal(current[1],edits[old[0]]);assert.notEqual(current[15],old[15]);for(let col=0;col<16;col++)if(![1,15].includes(col))assert.deepEqual(current[col],old[col]);}}
+const records=(state,table)=>Object.fromEntries(state[table].values.slice(1).map(r=>[r[0],JSON.parse(r[1])]));
+for(const table of ['Source Registry','Processed Sources'])assert.deepEqual(after[table],before[table]);
+const oldBases=records(before,'Task Baselines'),newBases=records(after,'Task Baselines');assert.deepEqual(Object.keys(newBases),Object.keys(oldBases));for(const [id,base] of Object.entries(oldBases)){const expected=JSON.parse(JSON.stringify(base));if(edits[id])expected.fields.task=edits[id];assert.deepEqual(newBases[id],expected);}
+const oldReviews=records(before,'Merge Reviews'),reviews=records(after,'Merge Reviews');assert.deepEqual(Object.keys(reviews),Object.keys(oldReviews));for(const [key,old] of Object.entries(oldReviews)){const expected=JSON.parse(JSON.stringify(old));for(const [id,snapshot] of Object.entries(expected.candidate_snapshots||{})){if(!edits[id])continue;const current=after[board].values.find(r=>r[0]===id);snapshot.values=current;}assert.deepEqual(reviews[key],expected);}
+assert.equal(Object.values(reviews).filter(r=>r.state==='pending').length,2);
+for(const table of ['Task History','Source Journal']){const old=records(before,table),current=records(after,table);for(const [key,value] of Object.entries(old))assert.deepEqual(current[key],value);assert.equal(Object.keys(current).length,Object.keys(old).length+1);}
+const journal=records(after,'Source Journal')['wording:session2-durable-descriptions'];assert.equal(journal.phase,'complete');assert.equal(journal.decision.confirmed,true);
+const hardware=after[board].values.find(r=>r[0]==='HM-0014');assert.equal(hardware[5],'2026-11-12');assert.equal(newBases['HM-0014'].fields.due_date,'2026-11-09');
+const report={passed:true,corrected_ids:Object.keys(edits),business_fields_preserved:true,original_records_preserved:true,pending_reviews:2,human_deadline:'2026-11-12',machine_deadline:'2026-11-09',approval_audited:true,before:beforePath,after:afterPath};fs.writeFileSync('session2-private/acceptance-wording.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));

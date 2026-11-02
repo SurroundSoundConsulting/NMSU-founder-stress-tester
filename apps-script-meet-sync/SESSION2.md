@@ -109,6 +109,8 @@ in mocks; shared inputs are never edited and the live board is never reset.
 
 - `node scripts/session2-check.cjs A|B|C|D`: compare the latest private snapshot
   with the initial legacy snapshot and stage-specific task/review/view assertions.
+- `node scripts/session2-wording-check.cjs BEFORE AFTER`: verify the approved
+  two-description repair, protected fields, pending reviews and audit.
 - `node scripts/session2-rerun-check.cjs BEFORE RUN AFTER`: exact durable-state
   and view comparison plus four skips and zero model requests.
 - Source fingerprint version 2 includes Project as well as title, meeting date and
