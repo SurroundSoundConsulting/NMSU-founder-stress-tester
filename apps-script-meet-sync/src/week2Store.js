@@ -18,7 +18,7 @@ function week2PlanOperations(book,source,fingerprint,merged,evidence,planningSta
   records('Task Baselines',Object.keys(merged.baselines).map(function(id){return [id,merged.baselines[id]];}));
   records('Task History',merged.histories.map(function(h){return [h.key,h];}));
   records('Merge Reviews',merged.reviews.map(function(r){return [r.key,r];}));
-  records('Source Registry',[[source.id,{id:source.id,url:source.url,title:source.title,date:source.date,fingerprint:fingerprint,fingerprint_version:2,project:source.project||'',outcome:'processed',evidence:evidence}]]);
+  records('Source Registry',[[source.id,{id:source.id,url:source.url,title:source.title,date:source.date,fingerprint:fingerprint,fingerprint_version:2,project:source.project||'',intake_metadata:source.intake_metadata||null,outcome:'processed',evidence:evidence}]]);
   var ledger=book.getSheetByName('Processed Sources');
   operations.push(week2Operation(book,'Processed Sources',ledger.getLastRow()+1,1,[[source.id,new Date().toISOString(),merged.added,JSON.stringify(evidence)]]));
   return operations;

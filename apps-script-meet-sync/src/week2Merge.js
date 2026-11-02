@@ -24,6 +24,7 @@ function validateWeek2Proposal(proposal,source,rows,objectives,baselines) {
     if(item.decision==='match'&&source.project&&(!baselines||!baselines[item.task_id]||baselines[item.task_id].identity.project.toLowerCase()!==source.project.toLowerCase()))throw new Error('unverified_project_match');
     if (item.candidate_ids.some(function(id){return !ids.includes(id);})) throw new Error('unknown_candidate');
     if (!item.identity||['action','deliverable','project','audience'].some(function(k){return typeof item.identity[k]!=='string';})) throw new Error('invalid_identity');
+    if(item.decision==='new'&&source.project&&item.identity.project.toLowerCase()!==source.project.toLowerCase())throw new Error('unverified_project_new');
     if(item.decision==='new' && (!item.identity.action||!item.identity.deliverable||!item.identity.project||!item.identity.audience||!item.changes.some(function(c){return c.field==='task'&&c.value.trim();})))throw new Error('missing_new_identity');
     var fields={};
     item.changes.forEach(function(c){

@@ -5,8 +5,10 @@ Apps Script were retained. Initial N=3 tasks (HM-0007–HM-0009), S=1 completed
 source (SYN-MTG-001). No business action items were executed, messages sent or
 triggers installed.
 
-Current board: **9 tasks, 5 completed sources, 2 pending reviews**.
-Private API deployment version **4**. Session 2 extraction used gpt-4.1; the
+Original A–D lab finish: **9 tasks, 5 completed sources, 2 pending reviews**.
+After the additional unseen-transcript test: **12 tasks, 6 completed sources,
+2 pending reviews**.
+Private API deployment version **6** after the additional intake fixes. Session 2 extraction used gpt-4.1; the
 Week 1 model setting was retained. Credentials and raw snapshots remain ignored.
 
 ## Main lab: observed live results
@@ -31,7 +33,7 @@ a green count/view check alone does not establish clean task text.
 
 ## Reliability: isolated verification
 
-`npm test`: **54 passed, 0 failed**. The following are local fixture/mocked checks,
+`npm test`: **63 passed, 0 failed** after the additional intake/schema/date regressions. The following are local fixture/mocked checks,
 not claims of live failure injection or real concurrent Google executions.
 
 | Check | Result and mode |
@@ -66,3 +68,45 @@ reduced their effects; semantic readback still found missing candidates and
 stale wording. Future transcripts use generic selected/batch/folder controls,
 with pending reviews inspected by a human. Lab A–D expected counts are not a
 universal correctness oracle.
+
+
+## Additional unseen-transcript folder E2E
+
+The facilitator added a new native research-sync Doc to the shared folder. The
+application discovered it through Drive using its own Apps Script credentials.
+The original failed on missing lab-style metadata, with no task/completion writes,
+zero model requests and four prior-source skips. The live Triggers page showed
+zero installed triggers for the facilitator; this pipeline is manually invoked.
+
+The facilitator supplied meeting date November 1, 2026. The exact document title
+was disclosed and used as a separate workstream label; it was not linked to
+Arroyo. Added reusable, audited intake metadata for headerless Docs without
+editing the shared source. A subsequent model proposal omitted task descriptions
+and was rejected before writes. Its next-Tuesday date also disagreed with the
+stated November 3 interpretation. New-task descriptions are now structurally
+required, and a narrow deterministic relative-weekday resolver records any model
+value it normalizes. Peer review caught and fixed first-line loss and overly broad
+normalization of qualified/absolute dates; regressions cover both.
+
+The successful **generic processWeek2Folder** run used no A–D expected-count gate:
+
+| Task | Owner | Due | Evidence |
+|---|---|---|---|
+| HM-0016: five controlled comparison experiments | Luis | November 5 | Five setups, planner-only vs JEV comparison and measurement requirements retained in quoted source evidence; board summary describes setup and recorded outcomes. |
+| HM-0017: Three Futures demo | Priya | November 6 | Predicted/actual examples and saving predictions before execution captured. |
+| HM-0018: ten act/observe/ask-for-help scenarios | Theo | November 3 | Unsafe attempts and unnecessary interruptions scored separately. Model November 10 normalized to November 3 with both values retained in history. |
+
+Observed: one processed source, three new tasks, zero task updates, zero new
+reviews, four old-source skips and one successful model request. All nine prior
+rows/formulas/timestamps and their supporting records survived exactly; the two
+pending reviews and human November 12 deadline remain protected. New tasks appear
+in the actual due/owner formula outputs. No tasks were created from jokes.
+The shared Doc text and revision were compared with the pre-test read and match.
+
+Final folder rerun: five skips, zero model requests/extractions, and identical
+before/after durable state and views. The private acceptance record is
+session2-private/acceptance-folder-e2e.json; repeatable checker is
+scripts/qa-folder-e2e.cjs. Timer execution is **NOT VERIFIED / NOT INSTALLED**;
+manual invocation of the full Google-hosted ingestion path is **PASS after the
+recorded fixes**. This additional test exposed limitations the original A–D lab
+had not exercised.

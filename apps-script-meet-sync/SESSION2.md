@@ -142,3 +142,56 @@ Script or `npm run session2 -- processSelectedWeek2`. Inspect the master and pen
 reviews. Use processWeek2Folder for a bounded selection when chronological human
 edits are not required between inputs. Keep reviewing proposals for semantic errors;
 local tests and a strict JSON schema cannot guarantee model interpretation.
+
+## Process newly added folder transcripts
+
+Discovery is live, not a fixed A–D allowlist. `processWeek2Folder()` lists native
+Google Docs directly inside INPUT_FOLDER_ID each time it runs. `inspectWeek2Folder()`
+provides a read-only inventory of new/unchanged/changed/invalid/unsupported files
+with names, IDs and parsed metadata; it makes no model calls. Nested folders,
+shortcuts, PDF and Word inputs are not automatically imported. Existing limits apply.
+
+The current workflow is **manual**. The live project Triggers page was checked
+and showed **0 triggers** for the facilitator. Moving a file into the folder does
+not run processing. Invoke through the Apps Script editor (select
+processWeek2Folder and click Run), or from this directory:
+
+```sh
+npm run session2 -- inspectWeek2Folder
+npm run session2 -- processWeek2Folder
+```
+
+A timer is optional for unattended polling, not required for this lab or manual
+E2E verification. A future time-driven trigger would invoke the same folder
+function. None has been installed or tested as a timer; today's proof is manual
+invocation of the actual Google-hosted folder -> Docs -> model -> Sheet path.
+
+The original structured title / Meeting date / Project / Transcript format still
+works. For headerless Docs, record the meeting date and a stable workstream label
+explicitly before processing:
+
+```sh
+npm run session2 -- setWeek2SourceMetadata '["DOC_ID",{"confirmed":true,"date":"2026-11-01","project":"YOUR_STABLE_PROJECT_NAME","actor":"Your name","reason":"Confirmed meeting date and chosen workstream"}]'
+```
+
+The intake control validates the original Doc and folder before storing metadata.
+It preserves the Doc, records actor/reason/time, rejects conflicting document
+headers and refuses metadata resets for completed sources. Confirmed metadata is
+retained with source registry evidence. A workstream label should be reused for
+follow-ups intended to match existing work. A document-title label creates a
+separate namespace unless later inputs use that exact label. Upload/modified time
+is never substituted for an unknown meeting date.
+
+Headerless body text retains first-line commitments and single-line transcripts;
+its title comes from native Doc metadata and is pinned at intake/completion so
+Drive filename changes do not create false changed-source reviews. New item schema requires task_description.
+Simple by/on/for weekday deadlines resolve against the meeting date; “next” uses
+the first occurrence strictly after that date. If normalization changes a model
+value, Task History retains both values and the rule. Absolute dates, qualified
+weeks/months/years and multiple weekdays are outside this narrow normalizer.
+
+`node scripts/qa-folder-e2e.cjs` checks the additional unseen-transcript acceptance
+case using private before/after paths and raw input. It verifies new deliverables,
+owners/dates, quoted evidence, unchanged prior records, formula views and a full
+folder rerun. It is an acceptance check for that documented input, not a universal
+quality checker for arbitrary future transcripts.
