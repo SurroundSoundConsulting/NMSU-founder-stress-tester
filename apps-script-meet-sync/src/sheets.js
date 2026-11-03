@@ -5,7 +5,7 @@ function getBoardBook(spreadsheetId) {
   return book;
 }
 function ensureTab(book,name,headers) {
-  var sheet = book.getSheetByName(name) || book.insertSheet(name);
+  var sheet = sheetByName(book,name) || book.insertSheet(name);
   if (!sheet.getLastRow()) sheet.getRange(1,1,1,headers.length).setValues([headers]);
   var actual = sheet.getRange(1,1,1,headers.length).getValues()[0];
   if (JSON.stringify(actual) !== JSON.stringify(headers)) throw new Error('Headers mismatch: ' + name);
@@ -18,3 +18,6 @@ function setupBoard(spreadsheetId) {
   ensureTab(book,'Processed Sources',['source_id','processed_at','task_count','evidence']);
   return {spreadsheetUrl:book.getUrl()};
 }
+
+// Keep logical storage names stable, including previously recorded journal operations.
+function sheetByName(book,name){var aliases={'Master Action Board':'Tasks','Tasks':'Master Action Board','Merge Reviews':'Reviews','Reviews':'Merge Reviews'},other=aliases[name],sheet=book.getSheetByName(name),alternate=other?book.getSheetByName(other):null;if(sheet&&alternate)throw new Error('duplicate_logical_sheet');return sheet||alternate;}

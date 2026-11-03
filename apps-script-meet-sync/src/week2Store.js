@@ -3,15 +3,15 @@ function week2Table(book,name){return ensureTab(book,name,W2_TABLES[name]);}
 function week2Records(book,name){var out={};dataRows(week2Table(book,name),2).forEach(function(r){if(r[0]){if(out[r[0]])throw new Error('duplicate_state_key');out[r[0]]=JSON.parse(r[1]);}});return out;}
 function week2Put(book,name,key,record){var sheet=week2Table(book,name),rows=dataRows(sheet,2),i=rows.findIndex(function(r){return r[0]===key;}),row=i<0?sheet.getLastRow()+1:i+2;sheet.getRange(row,1,1,2).setValues([[key,JSON.stringify(record)]]);}
 function week2State(book){
-  var sheet=book.getSheetByName('Master Action Board'),rows=dataRows(sheet,16),formulas={},grid=rows.length?sheet.getRange(2,1,rows.length,16).getFormulas():[];
+  var sheet=sheetByName(book,'Master Action Board'),rows=dataRows(sheet,16),formulas={},grid=rows.length?sheet.getRange(2,1,rows.length,16).getFormulas():[];
   rows.forEach(function(r,i){formulas[r[0]]=grid[i];});
   var blocked=[];Object.values(week2Records(book,'Source Journal')).forEach(function(j){if(j.phase!=='complete')blocked=blocked.concat(j.taskIds||[]);});
   return {rows:rows,formulas:formulas,baselines:week2Records(book,'Task Baselines'),objectives:dataRows(week2Table(book,'OKR Registry'),2).map(function(r){return r[0];}),blockedTaskIds:blocked};
 }
-function week2Capture(book){var names=['Master Action Board','Processed Sources'].concat(Object.keys(W2_TABLES).filter(function(n){return n!=='Run Log'&&n!=='View Settings'&&n!=='OKR Registry';})),out={};names.forEach(function(n){var s=book.getSheetByName(n);if(s){var width=n==='Master Action Board'?16:n==='Processed Sources'?4:2,count=s.getLastRow();out[n]={values:count?s.getRange(1,1,count,width).getValues():[],formulas:count?s.getRange(1,1,count,width).getFormulas():[]};}});return out;}
-function week2Operation(book,name,row,col,after){var range=book.getSheetByName(name).getRange(row,col,after.length,after[0].length);return {sheet:name,row:row,col:col,before:range.getValues(),formulas:range.getFormulas(),after:after};}
+function week2Capture(book){var names=['Master Action Board','Processed Sources'].concat(Object.keys(W2_TABLES).filter(function(n){return n!=='Run Log'&&n!=='View Settings'&&n!=='OKR Registry';})),out={};names.forEach(function(n){var s=sheetByName(book,n);if(s){var width=n==='Master Action Board'?16:n==='Processed Sources'?4:2,count=s.getLastRow();out[n]={values:count?s.getRange(1,1,count,width).getValues():[],formulas:count?s.getRange(1,1,count,width).getFormulas():[]};}});return out;}
+function week2Operation(book,name,row,col,after){var range=sheetByName(book,name).getRange(row,col,after.length,after[0].length);return {sheet:name,row:row,col:col,before:range.getValues(),formulas:range.getFormulas(),after:after};}
 function week2PlanOperations(book,source,fingerprint,merged,evidence,planningState){
-  var operations=[],current=planningState||week2State(book),latest=week2State(book),board=book.getSheetByName('Master Action Board');
+  var operations=[],current=planningState||week2State(book),latest=week2State(book),board=sheetByName(book,'Master Action Board');
   if(JSON.stringify(latest.rows)!==JSON.stringify(current.rows)||JSON.stringify(latest.formulas)!==JSON.stringify(current.formulas)||JSON.stringify(latest.baselines)!==JSON.stringify(current.baselines))throw new Error('intervening_edit_before_commit');
   merged.rows.forEach(function(row,i){if(i>=current.rows.length){var append=week2Operation(book,'Master Action Board',i+2,1,[row]);append.before=[Array(16).fill('')];append.formulas=[Array(16).fill('')];operations.push(append);return;}row.forEach(function(v,col){if(!w2Equal(v,current.rows[i][col])){var op=week2Operation(book,'Master Action Board',i+2,col+1,[[v]]);op.before=[[current.rows[i][col]]];op.formulas=[[(current.formulas[row[0]]||[])[col]||'']];operations.push(op);}});});
   function records(name,entries){var old=dataRows(week2Table(book,name),2),next=old.length+2;entries.forEach(function(pair){var index=old.findIndex(function(r){return r[0]===pair[0];}),value=JSON.stringify(pair[1]);if(index>=0&&old[index][1]===value)return;operations.push(week2Operation(book,name,index>=0?index+2:next++,1,[[pair[0],value]]));});}
@@ -19,13 +19,13 @@ function week2PlanOperations(book,source,fingerprint,merged,evidence,planningSta
   records('Task History',merged.histories.map(function(h){return [h.key,h];}));
   records('Merge Reviews',merged.reviews.map(function(r){return [r.key,r];}));
   records('Source Registry',[[source.id,{id:source.id,url:source.url,title:source.title,date:source.date,fingerprint:fingerprint,fingerprint_version:2,project:source.project||'',intake_metadata:source.intake_metadata||null,outcome:'processed',evidence:evidence}]]);
-  var ledger=book.getSheetByName('Processed Sources');
+  var ledger=sheetByName(book,'Processed Sources');
   operations.push(week2Operation(book,'Processed Sources',ledger.getLastRow()+1,1,[[source.id,new Date().toISOString(),merged.added,JSON.stringify(evidence)]]));
   return operations;
 }
 function week2ApplyOperations(book,journal){
   journal.operations.forEach(function(op){
-    var range=book.getSheetByName(op.sheet).getRange(op.row,op.col,op.after.length,op.after[0].length),actual=JSON.stringify(range.getValues()),formulas=range.getFormulas();
+    var range=sheetByName(book,op.sheet).getRange(op.row,op.col,op.after.length,op.after[0].length),actual=JSON.stringify(range.getValues()),formulas=range.getFormulas();
     if(actual===JSON.stringify(op.after)&&formulas.every(function(r){return r.every(function(f){return !f;});}))return;
     if(actual!==JSON.stringify(op.before)||JSON.stringify(formulas)!==JSON.stringify(op.formulas))throw new Error('intervening_edit_needs_reconciliation');
     if(!op.allowFormula&&formulas.some(function(r){return r.some(Boolean);}))throw new Error('formula_needs_reconciliation');
@@ -42,7 +42,7 @@ function setupWeek2(){
   var book=getBoardBook();setupBoard();Object.keys(W2_TABLES).forEach(function(n){week2Table(book,n);});
   var props=PropertiesService.getScriptProperties();if(!props.getProperty('INPUT_FOLDER_ID'))props.setProperty('INPUT_FOLDER_ID',WEEK2_FOLDER);
   var settings=week2Table(book,'View Settings');if(settings.getLastRow()===1){settings.getRange(2,1,3,2).setNumberFormat('@');settings.getRange(2,1,3,2).setValues([['reference_date','2026-11-04'],['owner',''],['okr','']]);}
-  return {spreadsheetUrl:book.getUrl(),oldTaskCount:dataRows(book.getSheetByName('Master Action Board'),16).length,oldCompletionCount:dataRows(book.getSheetByName('Processed Sources'),4).length,limits:WEEK2_LIMITS};
+  return {spreadsheetUrl:book.getUrl(),oldTaskCount:dataRows(sheetByName(book,'Master Action Board'),16).length,oldCompletionCount:dataRows(sheetByName(book,'Processed Sources'),4).length,limits:WEEK2_LIMITS};
 }
 function week2ProcessOne(id,expected){
   var lock=LockService.getScriptLock();lock.waitLock(30000);
@@ -84,7 +84,7 @@ function processWeek2Batch(ids,expected){
   var run={id:Utilities.getUuid(),at:new Date().toISOString(),outcomes:out};week2Put(getBoardBook(),'Run Log',run.id,run);return run;
 }
 function processWeek2Folder(){var folder=PropertiesService.getScriptProperties().getProperty('INPUT_FOLDER_ID')||WEEK2_FOLDER;var listing=week2Google('https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent("'"+folder+"' in parents and trashed=false and mimeType='application/vnd.google-apps.document'")+'&pageSize=100&fields=files(id),nextPageToken');if(listing.nextPageToken)throw new Error('folder_limit_deferred');return processWeek2Batch(listing.files.map(function(f){return f.id;}));}
-function inspectWeek2Recovery(id){var book=getBoardBook(),j=week2Records(book,'Source Journal')[id];if(!j)throw new Error('journal_not_found');return {journal:j,actual:j.operations.map(function(op){var r=book.getSheetByName(op.sheet).getRange(op.row,op.col,op.after.length,op.after[0].length);return {sheet:op.sheet,row:op.row,col:op.col,values:r.getValues(),formulas:r.getFormulas()};})};}
+function inspectWeek2Recovery(id){var book=getBoardBook(),j=week2Records(book,'Source Journal')[id];if(!j)throw new Error('journal_not_found');return {journal:j,actual:j.operations.map(function(op){var r=sheetByName(book,op.sheet).getRange(op.row,op.col,op.after.length,op.after[0].length);return {sheet:op.sheet,row:op.row,col:op.col,values:r.getValues(),formulas:r.getFormulas()};})};}
 function recoverWeek2Source(id,confirmation){if(confirmation!=='INSPECTED_SAFE_TO_FINISH')throw new Error('explicit_recovery_confirmation_required');var lock=LockService.getScriptLock();lock.waitLock(30000);try{var book=getBoardBook(),j=week2Records(book,'Source Journal')[id];if(!j)throw new Error('journal_not_found');if(!['planned','needs-reconciliation','complete'].includes(j.phase))throw new Error('human_approval_required');week2ApplyOperations(book,j);return {source:id,outcome:'recovered'};}finally{lock.releaseLock();}}
 
 // Explicit one-time upgrade for records created before Project was fingerprinted.

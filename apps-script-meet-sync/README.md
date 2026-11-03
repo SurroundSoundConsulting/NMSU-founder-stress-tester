@@ -1,3 +1,5 @@
+The manual draft-only Executor extension is described in [EXECUTOR.md](EXECUTOR.md); [EXECUTOR-QA.md](EXECUTOR-QA.md) distinguishes verified setup from pending live draft acceptance. Tasks and Reviews are the current physical names; the A–P contract and logical ingestion records are unchanged.
+
 Session 2 extends this existing project with conservative cross-meeting merges, review controls and operational views. See [SESSION2.md](SESSION2.md) for setup and commands, and [SESSION2-QA.md](SESSION2-QA.md) for observed acceptance results.
 
 # NMSU Hive Mind — Week 1 facilitator

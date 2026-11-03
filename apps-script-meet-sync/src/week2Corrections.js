@@ -32,13 +32,13 @@ function applyWeek2WordingCorrection(key,edits,decision){
       if(at<0||changed[edit.task_id]||!base||typeof edit.task!=='string'||!edit.task.trim()||state.rows[at][1]!==edit.expected||base.fields.task!==edit.expected||state.formulas[edit.task_id][1]||(state.blockedTaskIds||[]).includes(edit.task_id))throw new Error('wording_precondition_failed');
       var before=state.rows[at].slice(),after=before.slice();after[1]=safeCell(edit.task);after[15]=now;changed[edit.task_id]={before:before,after:after};audit.before.push(before);audit.after.push(after);
       ops.push(week2Operation(book,'Master Action Board',at+2,2,[[after[1]]]));ops.push(week2Operation(book,'Master Action Board',at+2,16,[[now]]));
-      var next=JSON.parse(JSON.stringify(base));next.fields.task=after[1];var bases=dataRows(book.getSheetByName('Task Baselines'),2),bi=bases.findIndex(function(r){return r[0]===edit.task_id;});ops.push(week2Operation(book,'Task Baselines',bi+2,1,[[edit.task_id,JSON.stringify(next)]]));
+      var next=JSON.parse(JSON.stringify(base));next.fields.task=after[1];var bases=dataRows(sheetByName(book,'Task Baselines'),2),bi=bases.findIndex(function(r){return r[0]===edit.task_id;});ops.push(week2Operation(book,'Task Baselines',bi+2,1,[[edit.task_id,JSON.stringify(next)]]));
     });
-    var reviewRows=dataRows(book.getSheetByName('Merge Reviews'),2);reviewRows.forEach(function(row,i){var review=JSON.parse(row[1]);if(review.state!=='pending')return;var original=JSON.parse(JSON.stringify(review)),touched=false;
+    var reviewRows=dataRows(sheetByName(book,'Merge Reviews'),2);reviewRows.forEach(function(row,i){var review=JSON.parse(row[1]);if(review.state!=='pending')return;var original=JSON.parse(JSON.stringify(review)),touched=false;
       Object.keys(review.candidate_snapshots||{}).forEach(function(id){if(!changed[id])return;var expected={values:changed[id].before.map(w2Scalar),formulas:state.formulas[id]};if(JSON.stringify(expected)!==JSON.stringify(review.candidate_snapshots[id]))throw new Error('stale_review');review.candidate_snapshots[id]={values:changed[id].after.map(w2Scalar),formulas:state.formulas[id]};touched=true;});
       if(touched){audit.review_refreshes.push({before:original,after:review});ops.push(week2Operation(book,'Merge Reviews',i+2,1,[[row[0],JSON.stringify(review)]]));}
     });
-    ops.push(week2Operation(book,'Task History',book.getSheetByName('Task History').getLastRow()+1,1,[[journalKey,JSON.stringify(audit)]]));
+    ops.push(week2Operation(book,'Task History',sheetByName(book,'Task History').getLastRow()+1,1,[[journalKey,JSON.stringify(audit)]]));
     var journal={source_id:journalKey,taskIds:Object.keys(changed),phase:'planned',edits:edits,decision:decision,operations:ops};week2Put(book,'Source Journal',journalKey,journal);SpreadsheetApp.flush();
     try{week2ApplyOperations(book,journal);}catch(e){journal.phase='needs-reconciliation';week2Put(book,'Source Journal',journalKey,journal);throw new Error('needs_reconciliation');}
     return {outcome:'corrected',task_ids:Object.keys(changed),pending_reviews_resolved:0};

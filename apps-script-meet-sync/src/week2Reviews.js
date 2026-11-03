@@ -40,7 +40,7 @@ function enrichWeek2PendingReviews(){var lock=LockService.getScriptLock();lock.w
     var ids=Array.from(new Set(old.candidate_ids.concat(week2ReviewCandidates(old.quotes,source.project,state.baselines))));if(ids.length===old.candidate_ids.length)return;
     var next=JSON.parse(JSON.stringify(old));next.candidate_ids=ids;next.candidate_snapshots={};ids.forEach(function(id){next.candidate_snapshots[id]={values:state.rows.find(function(r){return r[0]===id;}).map(w2Scalar),formulas:state.formulas[id]};});
     var event={key:'candidate-enrichment:'+key+':'+Utilities.getUuid(),source_id:old.source_id,reason:'Ground candidate suggestions in quoted deliverable terms; unresolved request remains pending',before:old,after:next,at:new Date().toISOString()};
-    var journal={source_id:event.key,taskIds:[],phase:'planned',operations:[week2Operation(book,'Task History',book.getSheetByName('Task History').getLastRow()+1,1,[[event.key,JSON.stringify(event)]]),week2Operation(book,'Merge Reviews',dataRows(book.getSheetByName('Merge Reviews'),2).findIndex(function(r){return r[0]===key;})+2,1,[[key,JSON.stringify(next)]])]};
+    var journal={source_id:event.key,taskIds:[],phase:'planned',operations:[week2Operation(book,'Task History',sheetByName(book,'Task History').getLastRow()+1,1,[[event.key,JSON.stringify(event)]]),week2Operation(book,'Merge Reviews',dataRows(sheetByName(book,'Merge Reviews'),2).findIndex(function(r){return r[0]===key;})+2,1,[[key,JSON.stringify(next)]])]};
     week2Put(book,'Source Journal',journal.source_id,journal);week2ApplyOperations(book,journal);updated.push(key);
   });return {enriched:updated,decisions_resolved:0,extractions:0};
 }finally{lock.releaseLock();}}

@@ -1,0 +1,14 @@
+SYNTHETIC — Arroyo pilot approved demo scope v1
+Fictional classroom material. All people, approvals, capabilities and constraints below are invented for this exercise, not extracted from the meeting transcripts. Instructor reviewed this fictional classroom scope on November 1, 2026; this is not a real business approval.
+Project: Arroyo pilot
+Scope version: ARROYO-DEMO-v1
+Scenario approver: Avery
+Scenario approval date: 2026-11-04
+Audience: Arroyo site manager and the Mesa Verde Robotics pilot team.
+Objective: Demonstrate the proposed operator workflow in a controlled tabletop simulation and collect site-readiness questions.
+Permitted demonstration: show the operator check-in, walk through a simulated pick-and-place cycle with sample objects, and review a simulated exception and safe-stop procedure.
+Constraints: Use a tabletop simulation only. No live customer equipment, production integration, performance guarantee, pricing, or launch commitment is approved.
+Duration: A 20-minute demonstration session, including questions.
+Required sequence: introduction and objective, operator workflow walkthrough, simulated exception and safe-stop review, then questions and next steps.
+Agenda owner: Jordan. The agenda is a proposal for human review. Do not add named attendees or a scheduled event date/time not supplied here.
+No launch date or site visit date has been approved. The task due date is not an event date.
