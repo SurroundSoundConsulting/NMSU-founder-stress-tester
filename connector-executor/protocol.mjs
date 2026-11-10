@@ -56,6 +56,41 @@ export function readEvents(rows) {
   }
   return events;
 }
+// Reconstruct from current connector reads, not a prior invocation's in-memory snapshot.
+export function restore(board_id, tables, request_id, currentSources, completion_search) {
+  const events=readEvents(tables['Executor Connector']);
+  const config=events.filter(e=>e.record_type==='configuration').at(-1)?.payload;
+  need(config,'configuration_missing');
+  const objects=(name,headers)=>table(tables[name],headers);
+  const requests=objects('Executor Requests',['request_id','task_id']);
+  const request=requests.find(r=>r.request_id===request_id); need(request,'request_missing');
+  const legacy=new Map();
+  for(const row of objects('Executor Journal',['event_id','execution_key','sequence','previous_hash','record_json','event_hash'])) {
+    let r;try{r=JSON.parse(row.record_json);}catch{throw new Stop('legacy_journal_unreadable');}
+    need(r.id && r.request,'legacy_journal_unreadable');
+    legacy.set(r.id,{...r,execution_id:r.id,deliverable_type:r.request.deliverable_type,version:String(r.request.version)});
+  }
+  const active=new Map();
+  for(const e of events.filter(e=>e.record_type==='run')) {
+    const previous=active.get(e.execution_id) || {};
+    const savedRequest=e.payload.input_snapshot?.request || previous.input_snapshot?.request;
+    need(savedRequest && savedRequest.task_id===e.task_id && savedRequest.request_id===e.request_id,'run_identity_missing');
+    active.set(e.execution_id,{...previous,...e.payload,execution_id:e.execution_id,task_id:e.task_id,request_id:e.request_id,
+      deliverable_type:savedRequest.deliverable_type,version:String(savedRequest.version)});
+  }
+  const accepted=events.filter(e=>e.record_type==='accepted_source').map(e=>e.payload);
+  const sources=accepted.filter(x=>x.context_set_id===request.context_set_id).map(x=>{
+    const current=currentSources.find(y=>y.file_id===x.file_id);
+    return {...x,text:current?.text ?? '',revision:current?.revision || '',access:current?.access || 'denied'};
+  });
+  return {board_id,config,request,tasks:objects('Tasks',['task_id','task','owner','status']),
+    history:objects('Task History',['history_id','source_id','task_id']),reviews:objects('Reviews',['review_id','source_id','task_id','candidate_ids']),
+    source_journal:objects('Source Journal',['source_id','fingerprint','phase','task_ids']).map(j=>{
+      let ids;try{ids=JSON.parse(j.task_ids || '[]');}catch{throw new Stop('ingestion_journal_unreadable');}
+      need(Array.isArray(ids),'ingestion_journal_unreadable');return {...j,affected_task_ids:ids};}),
+    registry:objects('Source Registry',['source_id']),processed_sources:objects('Processed Sources',['source_id']),
+    executions:[...legacy.values(),...active.values()],decisions:events.filter(e=>e.record_type==='decision').map(e=>e.payload),sources,completion_search};
+}
 export function eventRow(events, {id,type,task='',request='',execution='',at,actor,payload}) {
   need(id && type && at && actor && !Number.isNaN(Date.parse(at)), 'invalid_event');
   need(!events.some(e=>e.record_id===id),'duplicate_event');
@@ -156,6 +191,27 @@ export function preflight(s) {
   need(c.requirements?.length && new Set(c.requirements.map(x=>x.id)).size===c.requirements.length,'requirements_missing');
   for(const q of c.requirements) need(sources.some(x=>x.file_id===q.source_file_id && x.text.includes(q.quote) && q.quote.trim()),'requirement_not_grounded',q.id);
   return {action:'draft',task:t,sources,task_ids:[...closure]};
+}
+export function inputChanges(snapshot, execution) {
+  const before=execution.input_snapshot;
+  if(!before) return ['inspect_historical_snapshot'];
+  const normalize=r=>Object.fromEntries(Object.entries(r).sort().map(([k,v])=>[k,String(v ?? '')]));
+  const equal=(a,b)=>canonical(normalize(a))===canonical(normalize(b));
+  const changes=[];
+  if(!equal(before.request,snapshot.request))changes.push('request');
+  for(const task of before.tasks) {
+    const current=snapshot.tasks.find(x=>x.task_id===task.task_id);
+    if(!current || !equal(task,current))changes.push('task:'+task.task_id);
+  }
+  const ids=new Set(before.tasks.map(x=>x.task_id));
+  const relevant=reviews=>reviews.filter(r=>{
+    let candidates;try{candidates=JSON.parse(r.candidate_ids || '[]');}catch{throw new Stop('review_unreadable');}
+    return r.status==='pending' && [r.task_id,...candidates].some(id=>ids.has(id));
+  }).map(normalize).sort((a,b)=>a.review_id.localeCompare(b.review_id));
+  if(canonical(relevant(before.reviews))!==canonical(relevant(snapshot.reviews)))changes.push('relevant_reviews');
+  for(const source of snapshot.sources) if(source.access!=='readable' || source.text!==source.accepted_text)changes.push('source:'+source.file_id);
+  if(!snapshot.sources.length)changes.push('accepted_sources_missing');
+  return changes;
 }
 export function checkCandidate(candidate, config, sources) {
   need(candidate && Array.isArray(candidate.paragraphs) && candidate.paragraphs.length>0,'candidate_missing');

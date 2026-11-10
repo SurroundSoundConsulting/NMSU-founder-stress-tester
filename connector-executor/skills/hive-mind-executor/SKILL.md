@@ -5,7 +5,7 @@ description: Execute an explicitly requested Hive Mind agenda through connected 
 
 # Hive Mind Executor
 
-Protocol `connector-executor/1`. ChatGPT Work coordinates connector calls. Start manually with one designated writer and one task. Sheets determines what was requested, accepted, processed and saved. Finish with a usable native agenda for human review; business completion remains a human decision.
+Protocol `connector-executor/1`; instruction revision `1.1`. ChatGPT Work coordinates connector calls. Start manually with one designated writer and one task. Sheets determines what was requested, accepted, processed and saved. Finish with a usable native agenda for human review; business completion remains a human decision.
 
 ## Persistent context
 
