@@ -12,6 +12,17 @@ export function canonical(value) {
   return JSON.stringify(value);
 }
 export const identity = (board, request) => canonical([board,request.task_id,request.deliverable_type,String(request.version)]);
+export function createdFile(result) {
+  const id=result?.fileId || result?.id || result?.documentId;
+  need(typeof id==='string' && /^[A-Za-z0-9_-]+$/.test(id) && typeof result?.url==='string','unknown_create_result');
+  need(result.url.includes('/'+id+'/'),'output_identity');
+  return {output_id:id,output_url:result.url};
+}
+export function expectedNativeText(inserted, before) {
+  need(typeof inserted==='string' && before==='\n','not_known_blank');
+  // Inserting at index 1 retains the blank Doc's original terminal paragraph.
+  return inserted+before;
+}
 export function table(rows, required) {
   need(Array.isArray(rows) && Array.isArray(rows[0]), 'missing_table');
   need(required.every((h,i)=>rows[0][i] === h), 'schema_changed');
@@ -162,10 +173,11 @@ export function checkCandidate(candidate, config, sources) {
   // This establishes traceability/coverage. Semantic support still requires actual source inspection by Work.
   return text;
 }
-export function publicationDecision({phase,output_id,expected_text,before_revision}, observed, decision) {
+export function publicationDecision({phase,output_id,expected_text,expected_native_text,before_revision}, observed, decision) {
   if(!output_id) return {action:'stop',reason:phase==='create_intent'?'create_unknown':'no_registered_document'};
   if(!observed?.readable) return {action:'stop',reason:'output_access',output_id};
-  if(observed.text.replace(/\n+$/,'')===expected_text.replace(/\n+$/,'')) return {action:'finish_ledger_only',output_id};
+  need(typeof (expected_native_text ?? expected_text)==='string','missing_expected_state');
+  if(observed.text===(expected_native_text ?? expected_text)) return {action:'finish_ledger_only',output_id};
   if(!observed.text.trim() && observed.revision===before_revision && decision?.action==='populate_known_blank' && decision.actor && decision.reason)
     return {action:'write_saved_candidate',output_id,requiredRevisionId:before_revision};
   return {action:'stop',reason:'preserve_changed_document',output_id};
