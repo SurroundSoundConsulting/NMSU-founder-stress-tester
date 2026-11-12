@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "hive-mind-enforcer",
+  "version": "2.0.0",
+  "description": "Review an existing agenda and leave pending suggestions with rationale replies; direct correction requires explicit authorization."
+}
