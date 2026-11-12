@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "hive-mind-feedback",
+  "version": "1.0.0",
+  "description": "Direct same-document revisions from authorized human comments, original-thread replies and durable recovery through existing Google connections."
+}
