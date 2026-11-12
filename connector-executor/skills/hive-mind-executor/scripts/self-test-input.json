@@ -1,0 +1,106 @@
+{
+  "current": {
+    "board_id": "SYNTHETIC-BOARD-NOT-A-GOOGLE-ID",
+    "request": {
+      "request_id": "SYNTHETIC-SELF-TEST",
+      "task_id": "HM-9001",
+      "deliverable_type": "agenda",
+      "version": "3",
+      "enabled": "yes",
+      "project": "Synthetic self-test",
+      "audience": "Fictional audience",
+      "context_set_id": "fixture",
+      "requested_by": "Fictional test operator",
+      "requested_at": "2026-01-01T00:00:00Z",
+      "no_known_completion_at": "",
+      "previous_execution_id": "SYNTHETIC-PRIOR",
+      "revision_reason": "Local self-test only",
+      "reviewer": "Fictional test operator"
+    },
+    "tasks": [
+      {
+        "task_id": "HM-9001",
+        "task": "Fictional agenda",
+        "owner": "Fictional owner",
+        "status": "open",
+        "urgency": "0",
+        "due_date": "",
+        "next_step": "",
+        "blockers": "",
+        "dependencies": "HM-9002",
+        "okr_link": "",
+        "risk_flag": "",
+        "source_transcript_id": "",
+        "meeting_title": "",
+        "meeting_date": "",
+        "created_at": "",
+        "updated_at": ""
+      },
+      {
+        "task_id": "HM-9002",
+        "task": "Fictional prerequisite",
+        "owner": "Fictional owner",
+        "status": "done",
+        "urgency": "0",
+        "due_date": "",
+        "next_step": "",
+        "blockers": "",
+        "dependencies": "",
+        "okr_link": "",
+        "risk_flag": "",
+        "source_transcript_id": "",
+        "meeting_title": "",
+        "meeting_date": "",
+        "created_at": "",
+        "updated_at": ""
+      }
+    ],
+    "reviews": [],
+    "configuration_record": {
+      "record_id": "SYNTHETIC-CONFIG",
+      "payload": {
+        "board_id": "SYNTHETIC-BOARD-NOT-A-GOOGLE-ID",
+        "mode": "manual_single_writer",
+        "completion_folder_id": "SYNTHETIC-FOLDER"
+      }
+    },
+    "authorization_record": {
+      "record_id": "SYNTHETIC-AUTHORIZATION",
+      "payload": {
+        "action": "authorize_execution",
+        "request_id": "SYNTHETIC-SELF-TEST",
+        "version": "3",
+        "predecessor": "SYNTHETIC-PRIOR",
+        "actor": "Fictional test operator",
+        "recorded_at": "2026-01-01T00:00:00Z",
+        "authorization": "This text must remain out of the generated checkpoint."
+      }
+    },
+    "accepted_sources": [
+      {
+        "record_id": "SYNTHETIC-SOURCE",
+        "payload": {
+          "file_id": "SYNTHETIC-DOC",
+          "revision": "SYNTHETIC-REVISION",
+          "role": "scope",
+          "context_set_id": "fixture",
+          "project": "Synthetic self-test",
+          "approved": "yes",
+          "accepted_text": "This source body must remain out of the generated checkpoint.",
+          "accepted_by": "Fictional approver",
+          "accepted_at": "2026-01-01T00:00:00Z"
+        }
+      }
+    ],
+    "completion_search": {
+      "folder_id": "SYNTHETIC-FOLDER",
+      "checked_at": "2026-01-01T00:00:00Z",
+      "complete": true,
+      "files": []
+    }
+  },
+  "identity": {
+    "execution_id": "SYNTHETIC-EXECUTION",
+    "checked_at": "2026-01-01T00:00:00Z"
+  }
+}

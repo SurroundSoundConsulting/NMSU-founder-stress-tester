@@ -4,7 +4,7 @@ Read before any new generation or publication side effect.
 
 ## Draft and save
 
-Save frozen request/input/evidence manifest, execution/attempt identity and drafting intent before generation. Record actual available invocation evidence; unavailable provider IDs are explicitly unavailable. One generation per authorized attempt; uncertainty does not permit invisible retries.
+Before the first drafting-intent write, read [checkpoint.md](checkpoint.md), build and execute validation of the exact `executor-drafting/1` payload, and show its readable write summary. Reference existing configuration, authorization and accepted-source records by verified ID and canonical SHA-256 digest; freeze the complete fourteen-field request and only selected/dependency task rows. Keep full source text and unrelated history out of this initial event. Stop if actual deterministic validation is unavailable or the checkpoint is denied. Save and read back this intent before generation. Record actual available invocation evidence; unavailable provider IDs are explicitly unavailable. One generation per authorized attempt; uncertainty does not permit invisible retries.
 
 Produce the actual agenda. Assess every configured requirement against opened exact passages. Audience, total duration, objective, sequence and scope boundaries must be visible in agenda content, not only its appendix. Keep deadline separate from event/launch dates. Optional unknowns may be labeled; mandatory unknowns stop. New timing allocations, commitments, named attendees, pricing or guarantees require support. Preserve internal-only information boundaries.
 

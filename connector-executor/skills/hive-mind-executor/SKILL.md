@@ -5,7 +5,7 @@ description: Execute an explicitly requested Hive Mind agenda through connected 
 
 # Hive Mind Executor
 
-Protocol `connector-executor/1`; instruction revision `1.2`. ChatGPT Work coordinates connector calls. Start manually with one designated writer and one task. Sheets determines what was requested, accepted, processed and saved. Finish with a usable native agenda for human review; business completion remains a human decision. Do not invoke legacy controls, change permissions/triggers, send, complete tasks, resolve merge reviews or run Enforcer.
+Protocol `connector-executor/1`; instruction revision `1.3`. ChatGPT Work coordinates connector calls. Start manually with one designated writer and one task. Sheets determines what was requested, accepted, processed and saved. Finish with a usable native agenda for human review; business completion remains a human decision. Do not invoke legacy controls, change permissions/triggers, send, complete tasks, resolve merge reviews or run Enforcer.
 
 ## Persistent context
 
@@ -41,11 +41,13 @@ Missing mandatory facts, uncertain identity, conflicting scopes, denied access, 
 
 ## Publication and recovery routing
 
-Before any generation or publication side effect, read [publication.md](references/publication.md) in this installed skill. Before recovering any incomplete or uncertain run, read [recovery.md](references/recovery.md). If a required packaged reference is unavailable, stop. Completed unchanged requests return the registered output without loading publication details.
+Before any new drafting checkpoint, read [checkpoint.md](references/checkpoint.md) and execute its packaged deterministic validator. If it cannot run, stop; never improvise a snapshot or guess its digests. Before any generation or publication side effect, read [publication.md](references/publication.md) in this installed skill. Before recovering any incomplete or uncertain run, read [recovery.md](references/recovery.md). If a required packaged reference is unavailable, stop. Completed unchanged requests return the registered output without loading publication details.
 
 Preserve human edits and every known document ID. Persist intent before side effects, save returned IDs immediately, and use revision-guarded native writes. Uncertain create never authorizes another create. Sheets failure stops further external side effects. An explicit new version requires a recorded predecessor-linked human decision.
 
-The installed method is revision 1.2, compatible with protocol connector-executor/1. Preserve the original instruction provenance of historical executions. A compatible newer installed method may inspect an earlier completed output; new side effects require current authorization and the configured active method. Stop for an incompatible protocol or conflicting active method. Installing this skill grants no additional permissions and does not transfer runtime ownership.
+The installed method is revision 1.3, compatible with protocol connector-executor/1. Preserve the original instruction provenance of historical executions. A compatible newer installed method may inspect an earlier completed output; new side effects require current authorization and the configured active method. Stop for an incompatible protocol or conflicting active method. Installing this skill grants no additional permissions and does not transfer runtime ownership.
+
+A denied checkpoint remains denied. Inspect uncertainty read-only and preserve identities; a corrected proposal requires user-authorized continuation and fresh approval when prompted. Never split, encode or reroute data to bypass review.
 
 Unchanged repeats return same identity/link with no generation/Doc writes or successful-timestamp rewrite. Stops name what is missing/uncertain, checks performed, known output and one next action. If Sheets itself is unavailable, say durable reporting failed, stop external side effects and let prior intent block the next run.
 

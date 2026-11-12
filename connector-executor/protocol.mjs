@@ -1,4 +1,6 @@
 // Pure protocol helpers. ChatGPT Work owns connector calls; this module has no network or credentials.
+import {CHECKPOINT_SCHEMA,validateDraftingCheckpoint,compareCheckpoint} from './skills/hive-mind-executor/scripts/checkpoint.mjs';
+export {CHECKPOINT_SCHEMA,buildDraftingCheckpoint,validateDraftingCheckpoint,checkpointSummary} from './skills/hive-mind-executor/scripts/checkpoint.mjs';
 export const VERSION = 'connector-executor/1';
 export const HEADERS = ['record_id','record_type','task_id','request_id','execution_id','sequence','previous_record_id','recorded_at','actor','schema_version','payload_json'];
 export class Stop extends Error {
@@ -73,15 +75,22 @@ export function restore(board_id, tables, request_id, currentSources, completion
   const active=new Map();
   for(const e of events.filter(e=>e.record_type==='run')) {
     const previous=active.get(e.execution_id) || {};
+    if(e.payload.checkpoint_schema || e.payload.instruction_revision==='1.3') {
+      if(e.payload.phase==='drafting')validateDraftingCheckpoint(e.payload);
+    }
+    if(previous.checkpoint_schema && e.payload.input_snapshot)need(canonical(e.payload.input_snapshot)===canonical(previous.input_snapshot),'frozen_input_changed');
     const savedRequest=e.payload.input_snapshot?.request || previous.input_snapshot?.request;
     need(savedRequest && savedRequest.task_id===e.task_id && savedRequest.request_id===e.request_id,'run_identity_missing');
     active.set(e.execution_id,{...previous,...e.payload,execution_id:e.execution_id,task_id:e.task_id,request_id:e.request_id,
-      deliverable_type:savedRequest.deliverable_type,version:String(savedRequest.version)});
+      deliverable_type:savedRequest.deliverable_type,version:String(savedRequest.version),
+      previous_execution_id:savedRequest.previous_execution_id || previous.previous_execution_id || e.payload.previous_execution_id || '',
+      ...(e.payload.checkpoint_schema && e.payload.input_snapshot ? {accepted_source_records:e.payload.input_snapshot.sources.map(s=>s.record_id)} : {})});
   }
   const accepted=events.filter(e=>e.record_type==='accepted_source').map(e=>e.payload);
   const sources=accepted.filter(x=>x.context_set_id===request.context_set_id).map(x=>{
     const current=currentSources.find(y=>y.file_id===x.file_id);
-    return {...x,text:current?.text ?? '',revision:current?.revision || '',access:current?.access || 'denied'};
+    return {...x,record_id:events.find(e=>e.record_type==='accepted_source' && e.payload===x).record_id,
+      accepted_revision:x.revision,text:current?.text ?? '',revision:current?.revision || '',access:current?.access || 'denied'};
   });
   return {board_id,config,request,tasks:objects('Tasks',['task_id','task','owner','status']),
     history:objects('Task History',['history_id','source_id','task_id']),reviews:objects('Reviews',['review_id','source_id','task_id','candidate_ids']),
@@ -89,9 +98,10 @@ export function restore(board_id, tables, request_id, currentSources, completion
       let ids;try{ids=JSON.parse(j.task_ids || '[]');}catch{throw new Stop('ingestion_journal_unreadable');}
       need(Array.isArray(ids),'ingestion_journal_unreadable');return {...j,affected_task_ids:ids};}),
     registry:objects('Source Registry',['source_id']),processed_sources:objects('Processed Sources',['source_id']),
-    executions:[...legacy.values(),...active.values()],decisions:events.filter(e=>e.record_type==='decision').map(e=>e.payload),sources,completion_search};
+    executions:[...legacy.values(),...active.values()],decisions:events.filter(e=>e.record_type==='decision').map(e=>e.payload),sources,completion_search,events};
 }
 export function eventRow(events, {id,type,task='',request='',execution='',at,actor,payload}) {
+  if(type==='run' && payload?.phase==='drafting')validateDraftingCheckpoint(payload);
   need(id && type && at && actor && !Number.isNaN(Date.parse(at)), 'invalid_event');
   need(!events.some(e=>e.record_id===id),'duplicate_event');
   const group=execution || `${type}:${request || 'configuration'}`;
@@ -195,6 +205,21 @@ export function preflight(s) {
 export function inputChanges(snapshot, execution) {
   const before=execution.input_snapshot;
   if(!before) return ['inspect_historical_snapshot'];
+  if(execution.checkpoint_schema===CHECKPOINT_SCHEMA){
+    const frozen=Object.fromEntries(['checkpoint_schema','execution_id','instruction_revision','attempt','input_snapshot'].map(k=>[k,execution[k]]));
+    Object.assign(frozen,{phase:'drafting',generation_status:'not_started',provider_response_id:null});
+    const byId=id=>snapshot.events?.find(e=>e.record_id===id);
+    const cfg=snapshot.events?.filter(e=>e.record_type==='configuration').at(-1);
+    const accepted=snapshot.events?.filter(e=>e.record_type==='accepted_source' && e.payload.context_set_id===snapshot.request.context_set_id)||[];
+    const changes=compareCheckpoint({...snapshot,configuration_record:cfg,authorization_record:byId(before.authorization_ref.record_id),accepted_sources:accepted},frozen);
+    for(const src of snapshot.sources){
+      const ref=before.sources.find(x=>x.record_id===src.record_id);
+      if(!ref || src.access!=='readable' || src.text!==src.accepted_text || src.revision!==ref.revision)changes.push('source:'+src.file_id);
+    }
+    if(!snapshot.sources.length)changes.push('accepted_sources_missing');
+    return [...new Set(changes)];
+  }
+  need(before.request && Array.isArray(before.tasks) && before.tasks.every(t=>t && !Array.isArray(t) && t.task_id) && Array.isArray(before.reviews) && before.reviews.every(r=>r && !Array.isArray(r) && r.review_id),'invalid_input_snapshot');
   const normalize=r=>Object.fromEntries(Object.entries(r).sort().map(([k,v])=>[k,String(v ?? '')]));
   const equal=(a,b)=>canonical(normalize(a))===canonical(normalize(b));
   const changes=[];
