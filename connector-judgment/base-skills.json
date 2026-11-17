@@ -1,0 +1,18 @@
+{
+  "skills/hive-mind-executor/SKILL.md": "d3d2c1375225ccd16113a84e1336752a097670a2e45a6b8c10009bd2c8070ca2",
+  "skills/hive-mind-executor/references/publication.md": "6fd8b1cfa8cb2cade1f87ecd7ac3af9a46925c5fc2b56ddbcb8ad11730dabb2f",
+  "skills/hive-mind-executor/references/checkpoint.md": "2c937e52052a1606ba9903c08e6a9222ed940ddcce84cd7af2c6f4902f479b72",
+  "skills/hive-mind-executor/references/recovery.md": "1873f694970acef079dffbda9befb5428b96965b69af0962eefdeed1b88656e1",
+  "skills/hive-mind-executor/scripts/self-test-input.json": "65253ade169fd6aafabf65aed5ea297657c7d5de318fdf547e5ee1edc395817d",
+  "skills/hive-mind-executor/scripts/checkpoint.mjs": "6667c4d25e3838c726469389244f73bb539f1c39a18df776db8fc1dae39ac88b",
+  "skills/hive-mind-enforcer/SKILL.md": "c60e320e4fdefe32b38f686f65bd549f1a71a030a8e10dc3520e222eca292115",
+  "skills/hive-mind-enforcer/references/correction.md": "fb0ea2c2d81163396a1c82980804a525c6617f885b7b2d37680b77069094dc30",
+  "skills/hive-mind-enforcer/references/recovery.md": "d8357a4e18cf39275becc9368a02feb20b4f1c30abae13770f47445cc4ec5d8e",
+  "skills/hive-mind-enforcer/references/suggestions.md": "3957237784c2498a9b8fe83567bcd675c3af43ec56c16acef9b7c3b5e220945c",
+  "skills/hive-mind-enforcer/references/review.md": "2f053b1890318902c1cbbb91e4ed9a522745fdb29ee97022be36206cd4c8740d",
+  "skills/hive-mind-enforcer/references/records.md": "631eeeec82c13a3f3ebc1e3c78b2e0c2d0d70de868529a16afc019b4112709f3",
+  "skills/hive-mind-feedback/SKILL.md": "118f82f671c9bd9a1de1106c0c946c162cb4b3bbb8eeccbd843bf22bbd9eb5e3",
+  "skills/hive-mind-feedback/references/publication.md": "f2d1520c14df56cc467b531ac818cf13643fafcb47d962f139b068e9f31af415",
+  "skills/hive-mind-feedback/references/recovery.md": "c8b8394c1570ced9f6e08362f6aa5a476a19a29c5d7823b79a962829dc1628fb",
+  "skills/hive-mind-feedback/references/records.md": "e02d86327a23133e0cc21325f28b6c9eb56ea10ca88cb22b57c6e43e600826f5"
+}

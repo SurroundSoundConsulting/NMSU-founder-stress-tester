@@ -1,5 +1,6 @@
 // Pure protocol helpers. ChatGPT Work owns connector calls; this module has no network or credentials.
 import {CHECKPOINT_SCHEMA,validateDraftingCheckpoint,compareCheckpoint} from './skills/hive-mind-executor/scripts/checkpoint.mjs';
+import {requireJudgment} from '../connector-judgment/consumer.mjs';
 export {CHECKPOINT_SCHEMA,buildDraftingCheckpoint,validateDraftingCheckpoint,checkpointSummary} from './skills/hive-mind-executor/scripts/checkpoint.mjs';
 export const VERSION = 'connector-executor/1';
 export const HEADERS = ['record_id','record_type','task_id','request_id','execution_id','sequence','previous_record_id','recorded_at','actor','schema_version','payload_json'];
@@ -200,6 +201,7 @@ export function preflight(s) {
   for(const id of sourceIds) need(sources.some(x=>x.source_id===id && x.role==='transcript'),'transcript_missing',id);
   need(c.requirements?.length && new Set(c.requirements.map(x=>x.id)).size===c.requirements.length,'requirements_missing');
   for(const q of c.requirements) need(sources.some(x=>x.file_id===q.source_file_id && x.text.includes(q.quote) && q.quote.trim()),'requirement_not_grounded',q.id);
+  requireJudgment(s,'executor',c.active_method);
   return {action:'draft',task:t,sources,task_ids:[...closure]};
 }
 export function inputChanges(snapshot, execution) {

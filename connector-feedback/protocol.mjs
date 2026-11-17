@@ -2,9 +2,11 @@
 // No network, model calls, credentials, document creation or application runtime.
 import {canonical, Stop, readEvents, eventRow} from '../connector-executor/protocol.mjs';
 import {nativeSnapshot, sameNative} from '../connector-enforcer/protocol.mjs';
+import {requireJudgment} from '../connector-judgment/consumer.mjs';
 export {nativeSnapshot, sameNative};
 export const VERSION = 'connector-feedback/1';
-export const METHOD = '1.0';
+export const METHOD = '1.0'; // Historical direct-edit protocol fixtures retain their method.
+export const JUDGMENT_METHOD = '1.1';
 const need=(ok,code)=>{if(!ok)throw new Stop(code);};
 const clone=x=>JSON.parse(JSON.stringify(x));
 const same=(a,b)=>canonical(a)===canonical(b);
@@ -93,7 +95,8 @@ export function preflight(s) {
     need(!family.some(run=>run.item.predecessor_run_id===parent.run_id),'feedback_successor_fork');
   }
   need(r.enabled===true&&r.mode==='direct_supported'&&r.requested_by&&r.requested_at&&r.authorization,'request_authorization');
-  need(c.method===METHOD&&r.method===METHOD&&c.instruction_id===r.instruction_id,'method_conflict');
+  need(c.method===r.method&&[METHOD,JUDGMENT_METHOD].includes(r.method)&&c.instruction_id===r.instruction_id,'method_conflict');
+  requireJudgment(s,'feedback',r.method);
   need(c.mode==='manual_single_writer'&&c.writer===r.writer&&c.writer===s.writer,'writer_authority');
   need(s.writer_check_complete===true&&!s.active_writers?.length&&!s.runs.some(run=>!['complete','closed'].includes(run.phase)||run.phase==='closed'&&(run.effects_uncertain===true||run.max_phase_rank>=2)&&!(run.effects_reconciled?.confirmed_by&&run.effects_reconciled.confirmed_at&&run.effects_reconciled.reason&&run.effects_reconciled.item_key===run.key)),'active_or_uncertain_writer');
   need(c.allowed_doc_ids?.includes(r.doc_id)&&!c.protected_ids?.includes(r.doc_id),'destination');

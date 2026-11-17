@@ -5,7 +5,11 @@ description: Independently review a requested Hive Mind agenda against accepted 
 
 # Hive Mind Enforcer
 
-Method `2.0`; payload protocol `connector-enforcer/1` retains the `connector-executor/1` ledger envelope and historical identities. Review the Executor's registered existing native Doc. Return that same agenda plus one linked report per explicit review version. Work checks the evidence; the optional pure protocol module validates records/plans without coordinating apps or making model calls.
+Method `2.1`; payload protocol `connector-enforcer/1` retains the `connector-executor/1` ledger envelope and historical identities. Review the Executor's registered existing native Doc. Return that same agenda plus one linked report per explicit review version. Work checks the evidence; the optional pure protocol module validates records/plans without coordinating apps or making model calls.
+
+## Judgment integration
+
+Before new independent review, read [judgment.md](references/judgment.md) and the shared Judgment consumer procedure. This method requires a human-authorized board upgrade, configured Judgment Log and explicit learning grant. Save applicable decisions/rules as a companion; recheck them before effects. Automatically consider one useful lesson during new authorized work. Completed historical returns remain read-only with zero proposals; preserve original methods and outputs.
 
 ## Load and reconstruct
 
@@ -47,4 +51,4 @@ The V2 lab records a narrow successful scheduled desktop-browser publication tes
 
 ## Acceptance
 
-Test clean return, supported insertion/deletion/replacement, a pending native suggestion with rationale in its own thread after reload, safe repeats, missing rationale recovery, unknown publication outcomes, protected human edits/comments/suggestions, missing/changed sources and changed targets. Check explicit direct authorization and stale-revision rejection separately. Fresh contexts must reconstruct completed and interrupted work from durable instructions and records. Distinguish local protocol checks, observed development/desktop Work results, participant testing and Cloud. This release includes rationale replies for Enforcer proposals; human feedback processing and Judgment Log learning remain later work.
+Test clean return, supported insertion/deletion/replacement, a pending native suggestion with rationale in its own thread after reload, safe repeats, missing rationale recovery, unknown publication outcomes, protected human edits/comments/suggestions, missing/changed sources and changed targets. Check explicit direct authorization and stale-revision rejection separately. Fresh contexts must reconstruct completed and interrupted work from durable instructions and records. Distinguish local protocol checks, observed development/desktop Work results, participant testing and Cloud. This release includes rationale replies for Enforcer proposals; human feedback processing remains with Feedback; this revision consults Judgment and may propose lessons under a separate learning grant.

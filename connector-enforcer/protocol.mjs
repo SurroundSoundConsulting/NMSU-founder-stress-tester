@@ -1,7 +1,9 @@
 // Optional pure checks; Work coordinates connectors. No network, model API or credentials.
 import {canonical, Stop, readEvents, eventRow} from '../connector-executor/protocol.mjs';
+import {requireJudgment} from '../connector-judgment/consumer.mjs';
 export const VERSION = 'connector-enforcer/1';
 export const METHOD = '2.0';
+export const JUDGMENT_METHOD = '2.1';
 const need = (v, c) => { if (!v) throw new Stop(c); };
 const clone = x => JSON.parse(JSON.stringify(x));
 const same = (a,b) => canonical(a) === canonical(b);
@@ -100,6 +102,7 @@ export function preflight(s) {
     return !['closed','blocked'].includes(x.phase) || (effect && !reconciled);
   }),'active_or_uncertain_run');
   need(c.active_method===r.method && r.method && c.instruction_id===r.instruction_id,'method_conflict');
+  requireJudgment(s,'enforcer',r.method);
   const execution=s.executions.filter(x=>x.execution_id===r.executor_id);
   need(execution.length===1 && execution[0].phase==='complete' && execution[0].task_id===r.task_id && execution[0].deliverable_type===r.deliverable_type,'executor_identity');
   need(execution[0].output_id===r.draft_id || (r.fixture===true && r.draft_origin_id===execution[0].output_id && c.fixture_ids?.includes(r.draft_id)),'draft_identity');

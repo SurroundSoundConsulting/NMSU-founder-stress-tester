@@ -5,7 +5,11 @@ description: Revise a registered Hive Mind Google Doc directly from authorized h
 
 # Hive Mind Feedback
 
-Method `1.0`, payload protocol `connector-feedback/1`. Edit the registered **same native Doc**, then explain the actual change in the originating human comment thread. Work performs the evidence checks through connected Google tools; Sheets remembers each item and partial effect. Start manually with one designated writer, one Doc and one human comment at a time.
+Method `1.1`, payload protocol `connector-feedback/1`. Edit the registered **same native Doc**, then explain the actual change in the originating human comment thread. Work performs the evidence checks through connected Google tools; Sheets remembers each item and partial effect. Start manually with one designated writer, one Doc and one human comment at a time.
+
+## Judgment integration
+
+Before new comment interpretation, read [judgment.md](references/judgment.md) and the shared Judgment consumer procedure. This method requires a human-authorized board upgrade, configured Judgment Log and explicit learning grant. Save applicable decisions/rules as a companion; recheck them before effects. Automatically consider one useful lesson during new authorized work. Completed historical returns remain read-only with zero proposals; preserve original methods and outputs.
 
 ## Reconstruct before acting
 
@@ -37,7 +41,7 @@ Initial editing supports one bounded inline change inside an inspectable quoted 
 
 Spelling, grammar, formatting and supported clarification/fact corrections normally need no new Enforcer review. Changes to commitments, dates/prices used as commitments, scope, safety, disclosures, prior Enforcer findings, substantial restructuring or uncertainty require a recorded review decision. Ask for clarification instead of publishing an uncertain edit. Feedback does not run Enforcer itself. Link any later review to the revised document state; keep the earlier report intact.
 
-This release proposes no lessons and activates no rules. Draft approval, resolving a comment, accepting a suggestion and completing a business task are distinct. Tasks A–P, Reviews and existing Drafts cells remain read-only.
+During new authorized work, this revision can automatically propose a useful lesson under its separate Judgment grant. Only the board’s designated human can confirm a rule through Judgment; Feedback itself activates no rules. Draft approval, resolving a comment, accepting a suggestion and completing a business task are distinct. Tasks A–P, Reviews and existing Drafts cells remain read-only.
 
 ## Finish with evidence
 

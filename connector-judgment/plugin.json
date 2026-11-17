@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "hive-mind-judgment",
+  "version": "1.0.0",
+  "description": "Scoped human decisions, automatic lesson proposals and explicitly confirmed rules through the existing Google connections and board."
+}

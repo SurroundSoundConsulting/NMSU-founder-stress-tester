@@ -1,6 +1,6 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "hive-mind-executor",
-  "version": "1.3.0",
-  "description": "Evidence-based Hive Mind agenda execution through existing Google connections."
+  "version": "1.4.0",
+  "description": "Evidence-based Hive Mind agenda execution through existing Google connections. Consults the board Judgment Log and proposes useful lessons under explicit learning authorization."
 }
